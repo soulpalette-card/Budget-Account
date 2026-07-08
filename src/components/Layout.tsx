@@ -32,10 +32,7 @@ export function Layout() {
             <span className="text-lg font-bold text-slate-800">UNIKOYO 现金流预算</span>
             <nav className="flex gap-1">
               <NavLink to="/" end className={linkClass}>
-                总览
-              </NavLink>
-              <NavLink to="/month" className={linkClass}>
-                每月明细
+                账户
               </NavLink>
               <NavLink to="/settings" className={linkClass}>
                 设置

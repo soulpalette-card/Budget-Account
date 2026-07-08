@@ -12,6 +12,7 @@
 // ============================================================================
 
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { config, saveConfigOverrides, resetConfigOverrides, type BufferMode } from '../config'
 import * as store from '../lib/store'
 import * as backup from '../lib/backup'
@@ -23,6 +24,7 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-bold text-slate-800">设置</h2>
+      <AdvancedLinks />
       <ConfigSection />
       <MonthSection />
       <TemplateSection />
@@ -39,6 +41,32 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
       <h3 className="mb-4 text-lg font-bold text-slate-800">{title}</h3>
       {children}
     </div>
+  )
+}
+
+// ============================ 高级功能入口 ============================
+// 简单账本用不到这些，但需要“6个月现金流预测”的人可以从这里进。
+function AdvancedLinks() {
+  return (
+    <Card title="高级功能（需要时才用）">
+      <p className="mb-3 text-xs text-slate-400">
+        日常记账用「账户」页就够了。下面是给需要做未来现金流预测的人准备的进阶视图。
+      </p>
+      <div className="flex flex-wrap gap-3">
+        <Link
+          to="/overview"
+          className="rounded-md border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-100"
+        >
+          📊 6个月总览（计划 vs 实际 + 折线图）
+        </Link>
+        <Link
+          to="/month"
+          className="rounded-md border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-100"
+        >
+          🗂 每月明细（收入/支出/突发三区 + 缓冲金）
+        </Link>
+      </div>
+    </Card>
   )
 }
 

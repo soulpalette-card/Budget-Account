@@ -17,6 +17,7 @@ import { Layout } from './components/Layout'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { ResetPassword } from './pages/ResetPassword'
+import { Account } from './pages/Account'
 import { Overview } from './pages/Overview'
 import { MonthDetail } from './pages/MonthDetail'
 import { Settings } from './pages/Settings'
@@ -39,7 +40,10 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/" element={<Overview />} />
+            {/* 首页 = 简单账本（默认看到的就是它） */}
+            <Route path="/" element={<Account />} />
+            {/* 下面几个是“高级”页面，不放主导航，从设置里进 */}
+            <Route path="/overview" element={<Overview />} />
             <Route path="/month" element={<MonthDetail />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
