@@ -42,7 +42,8 @@ export interface Entry {
   category: string | null // 分类（下拉框选的）
   description: string | null // 说明文字
   confidence: Confidence | null // 把握度（主要给收入用）
-  settled: boolean // 是否已“落地/结清”（实际发生了没有）
+  settled: boolean // ✅ 打勾：这笔“规划项”是否已按规划实现（实际发生了）
+  is_unexpected: boolean // 是否“意外项”：true=不在规划内的临时收支；false=月初就规划好的
   note: string | null // 备注栏
   is_deleted: boolean // 软删除标记：true = 已删（但没真删，可恢复）
   created_at: string // 创建时间

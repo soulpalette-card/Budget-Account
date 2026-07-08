@@ -192,13 +192,14 @@ export async function saveEntry(input: {
   description?: string | null
   confidence?: Confidence | null
   settled?: boolean
+  is_unexpected?: boolean
   note?: string | null
 }): Promise<Entry> {
   const userId = await getUserId()
 
   // 组装要写进数据库的字段，金额固定两位小数
   const row = {
-    user_id: userId,
+    user_id: userId, // 记录“谁建的”（现在数据共享，这只是留个痕迹，不再限制可见范围）
     month_id: input.month_id,
     zone: input.zone,
     entry_date: input.entry_date ?? null,
@@ -207,6 +208,7 @@ export async function saveEntry(input: {
     description: input.description ?? null,
     confidence: input.confidence ?? null,
     settled: input.settled ?? false,
+    is_unexpected: input.is_unexpected ?? false, // 是否意外项（默认否=规划项）
     note: input.note ?? null,
   }
 
@@ -226,6 +228,13 @@ export async function saveEntry(input: {
     if (error) throw error
     return data as Entry
   }
+}
+
+// ✅ 打勾/取消打勾：把某条规划项标成“已实现 / 未实现”。
+// 明细页那个勾选框直接调它，改这一个字段，最省事。
+export async function setSettled(id: string, settled: boolean): Promise<void> {
+  const { error } = await supabase.from('entries').update({ settled }).eq('id', id)
+  if (error) throw error
 }
 
 // 删除一条记录 —— 【软删除】：只是把 is_deleted 标成 true，数据还在，能恢复。
