@@ -9,3 +9,53 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+/* ===== 列印样式（大白话）=====
+ * 点“列印/打印”时，浏览器会套用这一段。目标：干净地印在 A4 纸上。
+ *   · 纸张设为 A4、留 1.4cm 边距
+ *   · 背景变白、去掉阴影
+ *   · 带 .no-print 的东西（导航、按钮、输入行等）不印出来
+ *   · 表格里的输入框/下拉框去掉边框，看起来像普通文字
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 1.4cm;
+  }
+  body {
+    background: #fff !important;
+  }
+  /* 标了 no-print 的元素，打印时统统隐藏 */
+  .no-print {
+    display: none !important;
+  }
+  /* 只在打印时才显示的元素（比如打印用的标题） */
+  .print-only {
+    display: block !important;
+  }
+  /* 去掉卡片阴影，省墨也更清爽 */
+  .shadow-sm {
+    box-shadow: none !important;
+  }
+  /* 表格里的输入框/下拉框：打印时去边框，像纯文字 */
+  input,
+  select {
+    border: none !important;
+    background: transparent !important;
+    -webkit-appearance: none;
+    appearance: none;
+    padding: 0 !important;
+  }
+  /* 表格加淡边框，方便对账 */
+  table,
+  th,
+  td {
+    border: 1px solid #ccc !important;
+    border-collapse: collapse;
+  }
+}
+
+/* 平时（非打印）把“仅打印”的元素藏起来 */
+.print-only {
+  display: none;
+}
