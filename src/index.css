@@ -1,0 +1,11 @@
+/* 大白话：这三行把 Tailwind 的样式全部“倒进来”。删了界面就没样式了。 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 让整个页面用系统默认好看的字体，背景浅灰 */
+body {
+  @apply bg-slate-100 text-slate-800 antialiased;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
