@@ -21,7 +21,7 @@ export function Layout() {
   // 导航链接的样式：选中的高亮，没选中的灰色
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     'px-3 py-2 rounded-md text-sm font-medium ' +
-    (isActive ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-200')
+    (isActive ? 'bg-amber-500 text-white' : 'text-slate-600 hover:bg-slate-200')
 
   return (
     <div className="min-h-screen">
