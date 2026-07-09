@@ -126,27 +126,6 @@ function computeRunning(
   return result
 }
 
-// 按“天”把一组记录分组，日期新的排前面
-function groupByDay(entries: Entry[]): { date: string | null; items: Entry[] }[] {
-  const map = new Map<string, Entry[]>()
-  for (const e of entries) {
-    const key = e.entry_date ?? '' // 空日期归到一组
-    if (!map.has(key)) map.set(key, [])
-    map.get(key)!.push(e)
-  }
-  const groups = Array.from(map.entries()).map(([date, items]) => ({
-    date: date || null,
-    items,
-  }))
-  // 有日期的按日期倒序，空日期放最后
-  groups.sort((a, b) => {
-    if (a.date === null) return 1
-    if (b.date === null) return -1
-    return a.date < b.date ? 1 : -1
-  })
-  return groups
-}
-
 export function Account() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -193,7 +172,12 @@ export function Account() {
   const plannedEntries = allEntries.filter((e) => !e.is_unexpected)
   const unexpectedEntries = allEntries.filter((e) => e.is_unexpected)
   const shownEntries = tab === 'planned' ? plannedEntries : unexpectedEntries
-  const dayGroups = useMemo(() => groupByDay(shownEntries), [shownEntries])
+  // 按 收入 / 支出 分开，并各自算小计；合计 = 收入小计 − 支出小计
+  const incomeItems = shownEntries.filter((e) => e.zone === 'income')
+  const expenseItems = shownEntries.filter((e) => e.zone === 'expense')
+  const incomeSub = sumAmounts(incomeItems.map((e) => e.amount))
+  const expenseSub = sumAmounts(expenseItems.map((e) => e.amount))
+  const listTotal = round2(incomeSub - expenseSub)
   const calc =
     calcMap[selectedId] ??
     ({
@@ -375,34 +359,48 @@ export function Account() {
         </TabBtn>
       </div>
 
-      {/* ===== 按天分组的清单 ===== */}
+      {/* ===== 结构化清单：① 收入  ② 支出  ③ 合计 ===== */}
       {shownEntries.length === 0 ? (
         <div className="rounded-2xl bg-white py-10 text-center text-sm text-slate-400 shadow-sm">
           还没有记录，点下面「＋ 记一笔」添加
         </div>
       ) : (
         <div className="space-y-3">
-          {dayGroups.map((g) => (
-            <div key={g.date ?? 'none'} className="overflow-hidden rounded-2xl bg-white shadow-sm">
-              <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-400">
-                <span>{prettyDate(g.date)}</span>
-                <span>{g.items.length} 笔</span>
-              </div>
-              <div className="divide-y divide-slate-50">
-                {g.items.map((e) => (
-                  <EntryItem
-                    key={e.id}
-                    entry={e}
-                    planned={tab === 'planned'}
-                    onSave={saveField}
-                    onToggle={toggleSettled}
-                    onCopy={copyToNext}
-                    onRemove={removeRow}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
+          {/* ① 收入 */}
+          <ZoneGroup
+            title="收入"
+            tone="income"
+            items={incomeItems}
+            subtotal={incomeSub}
+            planned={tab === 'planned'}
+            onSave={saveField}
+            onToggle={toggleSettled}
+            onCopy={copyToNext}
+            onRemove={removeRow}
+          />
+          {/* ② 支出 */}
+          <ZoneGroup
+            title="支出"
+            tone="expense"
+            items={expenseItems}
+            subtotal={expenseSub}
+            planned={tab === 'planned'}
+            onSave={saveField}
+            onToggle={toggleSettled}
+            onCopy={copyToNext}
+            onRemove={removeRow}
+          />
+          {/* ③ 合计 */}
+          <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm">
+            <span className="font-bold text-slate-700">合计（收入 − 支出）</span>
+            <span
+              className={
+                'text-lg font-extrabold ' + (listTotal < 0 ? 'text-red-600' : 'text-emerald-600')
+              }
+            >
+              {formatMoney(listTotal)}
+            </span>
+          </div>
         </div>
       )}
 
@@ -454,6 +452,64 @@ function TabBtn({
 const inputCls =
   'w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none'
 
+// ---- 一组（收入 或 支出）：带小计的卡片 ----
+function ZoneGroup({
+  title,
+  tone,
+  items,
+  subtotal,
+  planned,
+  onSave,
+  onToggle,
+  onCopy,
+  onRemove,
+}: {
+  title: string
+  tone: 'income' | 'expense'
+  items: Entry[]
+  subtotal: number
+  planned: boolean
+  onSave: (e: Entry, patch: Partial<Entry>) => void
+  onToggle: (e: Entry) => void
+  onCopy: (e: Entry) => void
+  onRemove: (id: string) => void
+}) {
+  const color = tone === 'income' ? 'text-emerald-600' : 'text-red-600'
+  const sign = tone === 'income' ? '+' : '−'
+  return (
+    <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+      {/* 组标题 + 小计 */}
+      <div className="flex items-center justify-between bg-slate-50 px-4 py-2">
+        <span className="text-sm font-bold text-slate-700">
+          {title}
+          <span className="ml-2 text-xs font-normal text-slate-400">{items.length} 笔</span>
+        </span>
+        <span className={'text-sm font-bold ' + color}>
+          {sign}
+          {formatMoney(subtotal)}
+        </span>
+      </div>
+      {items.length === 0 ? (
+        <div className="px-4 py-3 text-center text-xs text-slate-400">（无）</div>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {items.map((e) => (
+            <EntryItem
+              key={e.id}
+              entry={e}
+              planned={planned}
+              onSave={onSave}
+              onToggle={onToggle}
+              onCopy={onCopy}
+              onRemove={onRemove}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- 一笔账：紧凑一行（图标 + 说明 + 金额 [+ 已实现圈]），点开展开编辑 ----
 function EntryItem({
   entry: e,
@@ -488,6 +544,7 @@ function EntryItem({
           </span>
           <span className="truncate text-[11px] text-slate-400">
             {e.category || (isIncome ? '收入' : '支出')}
+            {e.entry_date ? ' · ' + prettyDate(e.entry_date) : ''}
           </span>
         </button>
         <span className={'shrink-0 text-sm font-semibold ' + amtColor}>
