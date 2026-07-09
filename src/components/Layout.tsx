@@ -34,6 +34,9 @@ export function Layout() {
               <NavLink to="/" end className={linkClass}>
                 账户
               </NavLink>
+              <NavLink to="/overview" className={linkClass}>
+                6个月总览
+              </NavLink>
               <NavLink to="/settings" className={linkClass}>
                 设置
               </NavLink>

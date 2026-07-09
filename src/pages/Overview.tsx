@@ -1,203 +1,232 @@
 // ============================================================================
-// 文件摘要（Overview.tsx）—— 总览页
+// 文件摘要（Overview.tsx）—— 6 个月现金流总览
 // ----------------------------------------------------------------------------
-// 把“当前月 + 之后 5 个月”一共 6 个月并排显示，每行一个指标，全自动算：
-//   期初余额 | 预定收入 | 预定支出 | 预留缓冲 | 突发支出 | 缓冲余额 |
-//   计划期末(冻结) | 实际期末 | 状态(绿OK/黄吃紧/红赤字)
-// 下方画“实际期末”这 6 个月的小折线图。
-// 有一个“把握度筛选”开关：勾上后把暂定收入从实际余额里排除。
+// 一眼看完连续 6 个月的预算/现金流。起始月可选：
+//   选 2026-06 → 看 6、7、8、9、10、11
+//   选 2026-08 → 看 8、9、10、11、12、次年1
+// 每个月显示：期初 → 收入 / 支出 / 本月净 → 期末余额（一路累计结转）。
+// 下方一条「期末余额」折线图，趋势一目了然。
 //
-// 数据全走 store.ts；计算全走 calc.ts；本页只负责显示 + 加载/错误状态。
+// 这里是“大盘预测”视角：把每个月【所有】记录（规划＋意外，不管打没打勾）都算进去，
+// 相当于你 Excel 里那条一路往下的 BALANCE。数据走 store.ts。
 // ============================================================================
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import * as store from '../lib/store'
 import type { Entry, Month } from '../types'
-import { computeSeries, statusLabel, type MonthResult, type MonthStatus } from '../calc'
-import { Money } from '../components/Money'
-import { LineChart } from '../components/LineChart'
+import { formatMoney, round2, sumAmounts } from '../lib/money'
 import { friendlyError } from '../lib/errors'
+import { LineChart } from '../components/LineChart'
 
-// 找“当前月”的下标：优先找 label 里含今天年月(YYYY-MM)的那个月，找不到就从头开始。
-function findStartIndex(months: Month[]): number {
-  const now = new Date()
-  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const idx = months.findIndex((m) => m.label.includes(ym))
-  return idx >= 0 ? idx : 0
+// "YYYY-MM" 加 n 个月
+function ymAdd(label: string, n: number): string {
+  const m = label.match(/^(\d{4})-(\d{2})$/)
+  if (!m) return label
+  let y = Number(m[1])
+  let mo = Number(m[2]) - 1 + n // 转成 0~11 再加
+  y += Math.floor(mo / 12)
+  mo = ((mo % 12) + 12) % 12
+  return `${y}-${String(mo + 1).padStart(2, '0')}`
 }
 
-// 状态对应的颜色小圆点样式
-function statusChip(status: MonthStatus) {
-  const map: Record<MonthStatus, string> = {
-    OK: 'bg-green-100 text-green-700',
-    Tight: 'bg-yellow-100 text-yellow-700',
-    Deficit: 'bg-red-100 text-red-700',
-  }
-  return map[status]
+interface Row {
+  label: string
+  opening: number
+  income: number
+  expense: number
+  net: number
+  closing: number
+  exists: boolean // 这个月在数据库里有没有（没有就是还没建，显示空）
 }
 
 export function Overview() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [months, setMonths] = useState<Month[]>([])
-  const [entriesByMonth, setEntriesByMonth] = useState<Record<string, Entry[]>>({})
-  const [excludeTentative, setExcludeTentative] = useState(false) // 把握度筛选开关
+  const [byMonth, setByMonth] = useState<Record<string, Entry[]>>({})
+  const [startLabel, setStartLabel] = useState('')
 
-  // 加载数据：一次性把所有月份 + 所有记录拿回来
   useEffect(() => {
     let alive = true
-    async function load() {
+    async function run() {
       setLoading(true)
       setError('')
       try {
-        const [ms, allEntries] = await Promise.all([store.getMonths(), store.getAllEntries()])
+        const [ms, all] = await Promise.all([store.getMonths(), store.getAllEntries()])
         if (!alive) return
-        // 把记录按月分组
         const grouped: Record<string, Entry[]> = {}
         for (const m of ms) grouped[m.id] = []
-        for (const e of allEntries) {
-          if (grouped[e.month_id]) grouped[e.month_id].push(e)
-        }
+        for (const e of all) if (grouped[e.month_id]) grouped[e.month_id].push(e)
         setMonths(ms)
-        setEntriesByMonth(grouped)
+        setByMonth(grouped)
       } catch (err) {
         if (alive) setError(friendlyError(err))
       } finally {
         if (alive) setLoading(false)
       }
     }
-    load()
+    run()
     return () => {
       alive = false
     }
   }, [])
 
-  // 算整条链（用 useMemo 缓存，数据没变就不重算）
-  const series: MonthResult[] = useMemo(
-    () => computeSeries(months, entriesByMonth, excludeTentative),
-    [months, entriesByMonth, excludeTentative],
+  // 每个已存在月份（按 label 排序）的 收入/支出/期初
+  const sorted = useMemo(
+    () => [...months].sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)),
+    [months],
   )
+  const dataByLabel = useMemo(() => {
+    const map: Record<
+      string,
+      { income: number; expense: number; opening_balance: number }
+    > = {}
+    for (const m of sorted) {
+      const es = (byMonth[m.id] ?? []).filter((e) => !e.is_deleted)
+      map[m.label] = {
+        income: sumAmounts(es.filter((e) => e.zone === 'income').map((e) => e.amount)),
+        expense: sumAmounts(es.filter((e) => e.zone === 'expense').map((e) => e.amount)),
+        opening_balance: round2(m.opening_balance),
+      }
+    }
+    return map
+  }, [sorted, byMonth])
 
-  // 滚动窗口：从“当前月”开始取 6 个月
-  const startIndex = useMemo(() => findStartIndex(months), [months])
-  const windowResults = useMemo(
-    () => series.slice(startIndex, startIndex + 6),
-    [series, startIndex],
-  )
+  const earliest = sorted[0]?.label ?? ''
+  const latest = sorted[sorted.length - 1]?.label ?? ''
 
-  // 折线图的点：这 6 个月的“实际期末”
-  const chartPoints = windowResults.map((r) => ({ label: r.label, value: r.liveClosing }))
+  // 起始月默认＝最早的月份
+  useEffect(() => {
+    if (earliest && !startLabel) setStartLabel(earliest)
+  }, [earliest, startLabel])
 
-  // ---- 各种界面状态 ----
-  if (loading) {
-    return <div className="py-16 text-center text-slate-500">加载中…</div>
-  }
-  if (error) {
-    return (
-      <div className="rounded-md bg-red-50 p-4 text-red-700">
-        出错了：{error}
-      </div>
-    )
-  }
+  // 起始月可选项：从最早月份，到最后月份再往后 6 个月
+  const startOptions = useMemo(() => {
+    if (!earliest) return []
+    const end = ymAdd(latest || earliest, 6)
+    const opts: string[] = []
+    let cur = earliest
+    let guard = 0
+    while (cur <= end && guard < 60) {
+      opts.push(cur)
+      cur = ymAdd(cur, 1)
+      guard++
+    }
+    return opts
+  }, [earliest, latest])
+
+  // 从最早月份一路累计到窗口结束，算每个月的期初/期末
+  const rows: Row[] = useMemo(() => {
+    if (!earliest || !startLabel) return []
+    const windowEnd = ymAdd(startLabel, 5)
+    const runMap: Record<string, Row> = {}
+    let carry: number | null = null
+    let cur = earliest
+    let guard = 0
+    while (cur <= windowEnd && guard < 120) {
+      const d = dataByLabel[cur]
+      const income = d?.income ?? 0
+      const expense = d?.expense ?? 0
+      const opening = carry === null ? d?.opening_balance ?? 0 : carry
+      const net = round2(income - expense)
+      const closing = round2(opening + net)
+      runMap[cur] = { label: cur, opening, income, expense, net, closing, exists: !!d }
+      carry = closing
+      cur = ymAdd(cur, 1)
+      guard++
+    }
+    // 取窗口那 6 个月
+    const out: Row[] = []
+    let lab = startLabel
+    for (let i = 0; i < 6; i++) {
+      out.push(runMap[lab] ?? {
+        label: lab,
+        opening: carry ?? 0,
+        income: 0,
+        expense: 0,
+        net: 0,
+        closing: carry ?? 0,
+        exists: false,
+      })
+      lab = ymAdd(lab, 1)
+    }
+    return out
+  }, [earliest, startLabel, dataByLabel])
+
+  if (loading) return <div className="py-16 text-center text-slate-500">加载中…</div>
+  if (error) return <div className="rounded-md bg-red-50 p-4 text-red-700">出错了：{error}</div>
   if (months.length === 0) {
-    // 一个月都还没有 → 引导去设置/明细创建
     return (
-      <div className="rounded-xl bg-white p-8 text-center shadow-sm">
-        <p className="mb-4 text-slate-600">还没有任何月份数据。</p>
-        <Link
-          to="/settings"
-          className="inline-block rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-        >
-          去设置里新增第一个月
-        </Link>
+      <div className="rounded-2xl bg-white p-8 text-center text-slate-600 shadow-sm">
+        还没有任何月份，请先去「账户」记一笔。
       </div>
     )
   }
 
-  // 表格左边一列的“行名”
-  const rows: { key: keyof MonthResult; label: string; kind?: 'money' | 'status' }[] = [
-    { key: 'opening', label: '期初余额', kind: 'money' },
-    { key: 'plannedIncomeTotal', label: '预定收入', kind: 'money' },
-    { key: 'plannedExpenseTotal', label: '预定支出', kind: 'money' },
-    { key: 'bufferSetAside', label: '预留缓冲', kind: 'money' },
-    { key: 'unexpectedTotal', label: '突发支出', kind: 'money' },
-    { key: 'bufferRemaining', label: '缓冲余额', kind: 'money' },
-    { key: 'plannedClosing', label: '计划期末（冻结）', kind: 'money' },
-    { key: 'liveClosing', label: '实际期末', kind: 'money' },
-    { key: 'status', label: '状态', kind: 'status' },
-  ]
+  const chartPoints = rows.map((r) => ({ label: r.label.slice(5) + '月', value: r.closing }))
 
   return (
-    <div className="space-y-6">
-      {/* 顶部：标题 + 把握度筛选开关 */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-slate-800">总览（当前月 + 之后 5 个月）</h2>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={excludeTentative}
-            onChange={(e) => setExcludeTentative(e.target.checked)}
-          />
-          只算有把握的收入（排除“暂定”）
-        </label>
-      </div>
-
-      {/* 6 个月并排的表格 */}
-      <div className="overflow-x-auto rounded-xl bg-white shadow-sm">
-        <table className="w-full min-w-[720px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-200">
-              <th className="sticky left-0 bg-white px-4 py-3 text-left font-medium text-slate-500">
-                指标 \ 月份
-              </th>
-              {windowResults.map((r) => (
-                <th key={r.monthId} className="px-4 py-3 text-right font-semibold text-slate-700">
-                  {r.label}
-                </th>
+    <div className="mx-auto max-w-2xl space-y-3">
+      {/* 起始月选择 */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-gradient-to-br from-amber-300 to-yellow-400 p-4 shadow-sm">
+        <div>
+          <div className="text-xs text-amber-900/80">6 个月现金流总览 · 从这个月起看 6 个月</div>
+          <div className="mt-1 flex items-center gap-2">
+            <select
+              value={startLabel}
+              onChange={(e) => setStartLabel(e.target.value)}
+              className="rounded-md bg-white/50 px-2 py-1 font-bold text-amber-900 focus:outline-none"
+            >
+              {startOptions.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} className="border-b border-slate-100 last:border-0">
-                <td className="sticky left-0 bg-white px-4 py-2.5 text-left font-medium text-slate-500">
-                  {row.label}
-                </td>
-                {windowResults.map((r) => (
-                  <td key={r.monthId} className="px-4 py-2.5 text-right">
-                    {row.kind === 'status' ? (
-                      <span
-                        className={
-                          'inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ' +
-                          statusChip(r.status)
-                        }
-                      >
-                        {statusLabel(r.status)}
-                      </span>
-                    ) : (
-                      <Money
-                        value={r[row.key] as number}
-                        bold={row.key === 'liveClosing' || row.key === 'plannedClosing'}
-                      />
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </select>
+            <span className="text-sm text-amber-900/80">
+              → {rows[0]?.label} ~ {rows[5]?.label}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* 折线图：实际期末走势 */}
-      <div className="rounded-xl bg-white p-4 shadow-sm">
-        <h3 className="mb-2 font-semibold text-slate-700">实际期末走势</h3>
+      {/* 6 个月卡片 */}
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <div key={r.label} className="rounded-2xl bg-white p-3 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-800">
+                {r.label}
+                {!r.exists && <span className="ml-2 text-[11px] text-slate-300">（未建·暂空）</span>}
+              </span>
+              <span className="text-right">
+                <span className="mr-1 text-xs text-slate-400">期末</span>
+                <span className={'font-extrabold ' + (r.closing < 0 ? 'text-red-600' : 'text-slate-900')}>
+                  {formatMoney(r.closing)}
+                </span>
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <span className="text-slate-500">期初 {formatMoney(r.opening)}</span>
+              <span className="text-emerald-600">收 +{formatMoney(r.income)}</span>
+              <span className="text-red-600">支 -{formatMoney(r.expense)}</span>
+              <span className={r.net < 0 ? 'text-red-600' : 'text-emerald-600'}>
+                净 {formatMoney(r.net)}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 期末余额折线图 */}
+      <div className="rounded-2xl bg-white p-4 shadow-sm">
+        <h3 className="mb-2 text-sm font-semibold text-slate-700">期末余额走势</h3>
         <LineChart points={chartPoints} />
       </div>
 
-      {/* 小提示 */}
-      <p className="text-xs text-slate-400">
-        提示：突发支出只影响“实际期末”，不会改动“计划期末（冻结）”。缓冲余额变负说明救火钱不够了。
+      <p className="px-1 text-xs text-slate-400">
+        这里把每个月【所有】记录都算进去（不分打勾没打勾），是“大盘预测”。
+        想逐笔打勾对比计划 vs 实际，去「账户」页。
       </p>
     </div>
   )
