@@ -251,9 +251,21 @@ export function Account() {
     }
   }
 
+  // 锁定 / 解锁本月预算
+  async function toggleLock() {
+    if (!currentMonth) return
+    try {
+      await store.updateMonth(currentMonth.id, { budget_locked: !currentMonth.budget_locked })
+      load(selectedId)
+    } catch (err) {
+      setError(friendlyError(err))
+    }
+  }
+
   if (loading) return <div className="py-16 text-center text-slate-500">加载中…</div>
 
   const gap = round2(calc.actualClosing - calc.plannedClosing)
+  const locked = currentMonth?.budget_locked ?? false
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 pb-24">
@@ -272,7 +284,17 @@ export function Account() {
             ))}
           </select>
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-white/40 px-2 py-0.5 text-xs">共享账本</span>
+            {/* 锁定 / 解锁预算 */}
+            <button
+              onClick={toggleLock}
+              className={
+                'no-print rounded-full px-2 py-0.5 text-xs font-medium ' +
+                (locked ? 'bg-amber-900 text-white' : 'bg-white/60 text-amber-900')
+              }
+              title={locked ? '预算已锁定，点击解锁' : '点击锁定预算（锁定后新记的自动进临时增加）'}
+            >
+              {locked ? '🔒 已锁定' : '🔓 锁定预算'}
+            </button>
             <button onClick={() => window.print()} className="no-print text-amber-900">
               🖨
             </button>
@@ -339,7 +361,7 @@ export function Account() {
           规划 <span className="text-xs opacity-80">{calc.realizedCount}/{calc.plannedCount} 已实现</span>
         </TabBtn>
         <TabBtn active={tab === 'unexpected'} onClick={() => setTab('unexpected')}>
-          意外 <span className="text-xs opacity-80">{unexpectedEntries.length} 笔</span>
+          临时增加 <span className="text-xs opacity-80">{unexpectedEntries.length} 笔</span>
         </TabBtn>
       </div>
 
@@ -357,6 +379,7 @@ export function Account() {
             items={incomeItems}
             subtotal={incomeSub}
             planned={tab === 'planned'}
+            frozen={locked && tab === 'planned'}
             onSave={saveField}
             onToggle={toggleSettled}
             onCopy={copyToNext}
@@ -369,6 +392,7 @@ export function Account() {
             items={expenseItems}
             subtotal={expenseSub}
             planned={tab === 'planned'}
+            frozen={locked && tab === 'planned'}
             onSave={saveField}
             onToggle={toggleSettled}
             onCopy={copyToNext}
@@ -388,18 +412,23 @@ export function Account() {
         </div>
       )}
 
-      {/* ===== 底部大「＋ 记一笔」按钮（悬浮） ===== */}
+      {/* ===== 底部大「＋ 记一笔」按钮（悬浮） =====
+          锁定后：新记的一律进「临时增加」，并自动切到那一栏 */}
       <button
-        onClick={() => setAdding(true)}
+        onClick={() => {
+          if (locked) setTab('unexpected')
+          setAdding(true)
+        }}
         className="no-print fixed bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full bg-amber-500 px-6 py-3 font-bold text-white shadow-lg hover:bg-amber-600"
       >
-        ＋ 记一笔{tab === 'unexpected' ? '（意外）' : '（规划）'}
+        ＋ 记一笔{locked || tab === 'unexpected' ? '（临时增加）' : '（规划）'}
       </button>
 
       {/* ===== 记一笔弹窗 ===== */}
       {adding && (
         <AddSheet
-          unexpected={tab === 'unexpected'}
+          unexpected={locked || tab === 'unexpected'}
+          locked={locked}
           monthId={selectedId}
           onClose={() => setAdding(false)}
           onAdded={() => load(selectedId)}
@@ -443,6 +472,7 @@ function ZoneGroup({
   items,
   subtotal,
   planned,
+  frozen = false,
   onSave,
   onToggle,
   onCopy,
@@ -453,6 +483,7 @@ function ZoneGroup({
   items: Entry[]
   subtotal: number
   planned: boolean
+  frozen?: boolean
   onSave: (e: Entry, patch: Partial<Entry>) => void
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
@@ -482,6 +513,7 @@ function ZoneGroup({
               key={e.id}
               entry={e}
               planned={planned}
+              frozen={frozen}
               onSave={onSave}
               onToggle={onToggle}
               onCopy={onCopy}
@@ -498,6 +530,7 @@ function ZoneGroup({
 function EntryItem({
   entry: e,
   planned,
+  frozen = false,
   onSave,
   onToggle,
   onCopy,
@@ -505,6 +538,7 @@ function EntryItem({
 }: {
   entry: Entry
   planned: boolean
+  frozen?: boolean
   onSave: (e: Entry, patch: Partial<Entry>) => void
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
@@ -588,8 +622,28 @@ function EntryItem({
         )}
       </div>
 
-      {/* 展开态：编辑 */}
-      {open && (
+      {/* 展开态：预算锁定时只读；否则可编辑 */}
+      {open && frozen && (
+        <div className="space-y-1 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          <div>🔒 预算已锁定，这笔规划不能改。要修改请先点顶部「已锁定」解锁。</div>
+          {e.sub_items && e.sub_items.length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {e.sub_items.map((s, i) => (
+                <div key={i} className="flex justify-between">
+                  <span>· {s.desc || '（未填）'}</span>
+                  <span>{formatMoney(s.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="pt-1 text-right">
+            <button onClick={() => onCopy(e)} className="text-amber-600 hover:text-amber-800">
+              复制到下月
+            </button>
+          </div>
+        </div>
+      )}
+      {open && !frozen && (
         <div className="space-y-2 bg-slate-50 px-4 py-3">
           {subs.length === 0 ? (
             <>
@@ -727,12 +781,14 @@ function EntryItem({
 // ---- 「记一笔」底部弹窗 ----
 function AddSheet({
   unexpected,
+  locked = false,
   monthId,
   onClose,
   onAdded,
   onError,
 }: {
   unexpected: boolean
+  locked?: boolean
   monthId: string
   onClose: () => void
   onAdded: () => void
@@ -781,12 +837,17 @@ function AddSheet({
       <div className="w-full max-w-md rounded-t-2xl bg-white p-4 shadow-xl sm:rounded-2xl">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-bold text-slate-800">
-            记一笔{unexpected ? '（意外）' : '（规划）'}
+            记一笔{unexpected ? '（临时增加）' : '（规划）'}
           </span>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             ✕
           </button>
         </div>
+        {locked && (
+          <div className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            🔒 预算已锁定，这笔会记入「临时增加」。
+          </div>
+        )}
 
         {/* 支出 / 收入 切换 */}
         <div className="mb-3 grid grid-cols-2 gap-2">

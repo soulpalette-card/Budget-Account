@@ -28,6 +28,7 @@ export interface Month {
   label: string // 月份名字，例如 "2026-07" 或 "七月"
   sort_order: number // 排序用的序号，越小越靠前
   opening_balance: number // 期初余额（这个月一开始手里有多少钱）
+  budget_locked: boolean // 预算是否已锁定：锁定后规划栏冻结，新记的自动进“临时增加”
   created_at: string // 创建时间
 }
 

@@ -130,10 +130,10 @@ export async function addMonth(input: {
   return data as Month
 }
 
-// 修改月份（比如改期初余额、改名字、改排序）。只传要改的字段即可。
+// 修改月份（改期初/名字/排序/锁定状态）。只传要改的字段即可。
 export async function updateMonth(
   id: string,
-  patch: Partial<Pick<Month, 'label' | 'opening_balance' | 'sort_order'>>,
+  patch: Partial<Pick<Month, 'label' | 'opening_balance' | 'sort_order' | 'budget_locked'>>,
 ): Promise<void> {
   // 如果改到金额，顺手 round2
   const clean: Record<string, unknown> = { ...patch }
