@@ -379,28 +379,37 @@ export function Account() {
 
       {/* ===== 差异卡：差多少 + 哪里出问题 ===== */}
       <div className="rounded-2xl bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-bold text-slate-700">差异 Variance（实际 − 预算）</span>
-          <span
-            className={'text-xl font-extrabold ' + (variance < 0 ? 'text-red-600' : 'text-emerald-600')}
-          >
-            {variance >= 0 ? '+' : '-'}
-            {compactNum(Math.abs(variance))}
-          </span>
+        {/* 标题 + 大数字：竖排，不再挤一行 */}
+        <div className="text-xs font-semibold text-slate-500">差异 Variance · 实际 − 预算</div>
+        <div
+          className={
+            'text-2xl font-extrabold ' + (variance < 0 ? 'text-red-600' : 'text-emerald-600')
+          }
+        >
+          {variance >= 0 ? '+' : '-'}
+          {compactNum(Math.abs(variance))}
         </div>
-        <div className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-xs">
-          <div className="mb-1 text-slate-400">差异从哪来 👇</div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500">
-              🔸 未实现预算（计划了还没发生）· {unsettled.length} 笔
+
+        <div className="mt-3 space-y-2 border-t border-slate-100 pt-2 text-xs">
+          <div className="text-slate-400">差异从哪来 👇</div>
+          {/* 每行：标签左（可换行）＋ 金额右上对齐 */}
+          <div className="flex items-start justify-between gap-3">
+            <span className="min-w-0 text-slate-500">
+              🔸 未实现预算 · {unsettled.length} 笔
+              <span className="block text-[11px] text-slate-400">（计划了还没发生）</span>
             </span>
-            <span className="tabular-nums text-slate-500">{compactNum(unsettledNet)}</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500">
+              {compactNum(unsettledNet)}
+            </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500">
-              🔹 临时新款（计划外冒出来）· {unexpectedEntries.length} 笔
+          <div className="flex items-start justify-between gap-3">
+            <span className="min-w-0 text-slate-500">
+              🔹 临时新款 · {unexpectedEntries.length} 笔
+              <span className="block text-[11px] text-slate-400">（计划外冒出来）</span>
             </span>
-            <span className="tabular-nums text-slate-500">{compactNum(tempNet)}</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500">
+              {compactNum(tempNet)}
+            </span>
           </div>
         </div>
       </div>
