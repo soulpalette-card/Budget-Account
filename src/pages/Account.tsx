@@ -116,8 +116,7 @@ export function Account() {
   const [months, setMonths] = useState<Month[]>([])
   const [byMonth, setByMonth] = useState<Record<string, Entry[]>>({})
   const [selectedId, setSelectedId] = useState('')
-  const [tab, setTab] = useState<'planned' | 'unexpected'>('planned') // 当前看哪个清单
-  const [adding, setAdding] = useState(false) // 是否弹出“记一笔”面板
+  const [addTarget, setAddTarget] = useState<null | 'budget' | 'temp'>(null) // 记一笔弹窗目标
 
   async function load(keepId?: string) {
     setLoading(true)
@@ -152,15 +151,9 @@ export function Account() {
   const currentMonth = months.find((m) => m.id === selectedId)
   const isFirstMonth = months.length > 0 && months[0].id === selectedId
   const allEntries = (byMonth[selectedId] ?? []).filter((e) => !e.is_deleted)
-  const plannedEntries = allEntries.filter((e) => !e.is_unexpected)
-  const unexpectedEntries = allEntries.filter((e) => e.is_unexpected)
-  const shownEntries = tab === 'planned' ? plannedEntries : unexpectedEntries
-  // 按 收入 / 支出 分开，并各自算小计；合计 = 收入小计 − 支出小计
-  const incomeItems = shownEntries.filter((e) => e.zone === 'income')
-  const expenseItems = shownEntries.filter((e) => e.zone === 'expense')
-  const incomeSub = sumAmounts(incomeItems.map((e) => e.amount))
-  const expenseSub = sumAmounts(expenseItems.map((e) => e.amount))
-  const listTotal = round2(incomeSub - expenseSub)
+  const plannedEntries = allEntries.filter((e) => !e.is_unexpected) // 预算栏
+  const unexpectedEntries = allEntries.filter((e) => e.is_unexpected) // 临时新款
+  const actualCopied = plannedEntries.filter((e) => e.settled) // 已勾选“加入实际”的预算项
   const calc =
     calcMap[selectedId] ??
     ({
@@ -355,82 +348,104 @@ export function Account() {
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {msg && <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</div>}
 
-      {/* ===== 切换：规划 / 意外 ===== */}
-      <div className="no-print grid grid-cols-2 gap-2">
-        <TabBtn active={tab === 'planned'} onClick={() => setTab('planned')}>
-          规划 <span className="text-xs opacity-80">{calc.realizedCount}/{calc.plannedCount} 已实现</span>
-        </TabBtn>
-        <TabBtn active={tab === 'unexpected'} onClick={() => setTab('unexpected')}>
-          临时增加 <span className="text-xs opacity-80">{unexpectedEntries.length} 笔</span>
-        </TabBtn>
-      </div>
-
-      {/* ===== 结构化清单：① 收入  ② 支出  ③ 合计 ===== */}
-      {shownEntries.length === 0 ? (
-        <div className="rounded-2xl bg-white py-10 text-center text-sm text-slate-400 shadow-sm">
-          还没有记录，点下面「＋ 记一笔」添加
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {/* ① 收入 */}
-          <ZoneGroup
-            title="收入"
-            tone="income"
-            items={incomeItems}
-            subtotal={incomeSub}
-            planned={tab === 'planned'}
-            frozen={locked && tab === 'planned'}
-            onSave={saveField}
-            onToggle={toggleSettled}
-            onCopy={copyToNext}
-            onRemove={removeRow}
-          />
-          {/* ② 支出 */}
-          <ZoneGroup
-            title="支出"
-            tone="expense"
-            items={expenseItems}
-            subtotal={expenseSub}
-            planned={tab === 'planned'}
-            frozen={locked && tab === 'planned'}
-            onSave={saveField}
-            onToggle={toggleSettled}
-            onCopy={copyToNext}
-            onRemove={removeRow}
-          />
-          {/* ③ 合计 */}
-          <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm">
-            <span className="font-bold text-slate-700">合计（收入 − 支出）</span>
-            <span
-              className={
-                'text-lg font-extrabold ' + (listTotal < 0 ? 'text-red-600' : 'text-emerald-600')
-              }
-            >
-              {formatMoney(listTotal)}
+      {/* ===== 双栏对照：预算 Budget  ｜  实际现金流 Actual ===== */}
+      <div className="grid gap-3 md:grid-cols-2">
+        {/* —— 左栏：预算 —— */}
+        <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+          <div className="flex items-center justify-between bg-slate-100 px-4 py-2">
+            <span className="text-sm font-bold text-slate-700">
+              📋 预算 Budget {locked && '🔒'}
+            </span>
+            <span className="text-sm font-bold text-slate-700">
+              {formatMoney(round2(calc.plannedIncome - calc.plannedExpense))}
             </span>
           </div>
+          <div className="px-4 py-1 text-[11px] text-slate-400">
+            收 +{formatMoney(calc.plannedIncome)} · 支 -{formatMoney(calc.plannedExpense)} ·
+            点每笔右边的 ○ 把它加入实际 →
+          </div>
+          {plannedEntries.length === 0 ? (
+            <div className="px-4 py-6 text-center text-xs text-slate-400">
+              还没有预算项，点下面「＋ 加预算项」
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {plannedEntries.map((e) => (
+                <EntryItem
+                  key={e.id}
+                  entry={e}
+                  planned
+                  frozen={locked}
+                  onSave={saveField}
+                  onToggle={toggleSettled}
+                  onCopy={copyToNext}
+                  onRemove={removeRow}
+                />
+              ))}
+            </div>
+          )}
+          {!locked && (
+            <button
+              onClick={() => setAddTarget('budget')}
+              className="w-full border-t border-slate-100 py-2.5 text-sm text-amber-600 hover:bg-amber-50"
+            >
+              ＋ 加预算项
+            </button>
+          )}
         </div>
-      )}
 
-      {/* ===== 底部大「＋ 记一笔」按钮（悬浮） =====
-          锁定后：新记的一律进「临时增加」，并自动切到那一栏 */}
-      <button
-        onClick={() => {
-          if (locked) setTab('unexpected')
-          setAdding(true)
-        }}
-        className="no-print fixed bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full bg-amber-500 px-6 py-3 font-bold text-white shadow-lg hover:bg-amber-600"
-      >
-        ＋ 记一笔{locked || tab === 'unexpected' ? '（临时增加）' : '（规划）'}
-      </button>
+        {/* —— 右栏：实际现金流 —— */}
+        <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+          <div className="flex items-center justify-between bg-emerald-50 px-4 py-2">
+            <span className="text-sm font-bold text-emerald-700">💵 实际现金流 Actual</span>
+            <span className="text-sm font-bold text-emerald-700">
+              {formatMoney(round2(calc.realizedIncome - calc.realizedExpense))}
+            </span>
+          </div>
+          <div className="px-4 py-1 text-[11px] text-slate-400">
+            收 +{formatMoney(calc.realizedIncome)} · 支 -{formatMoney(calc.realizedExpense)} ·
+            左边勾选的 + 下面的临时新款
+          </div>
+          {actualCopied.length === 0 && unexpectedEntries.length === 0 ? (
+            <div className="px-4 py-6 text-center text-xs text-slate-400">
+              从左边预算勾选加入，或加「临时新款」
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {/* 来自预算（已勾选） */}
+              {actualCopied.map((e) => (
+                <CopiedRow key={e.id} entry={e} onRemove={() => toggleSettled(e)} />
+              ))}
+              {/* 临时新款（不在预算内） */}
+              {unexpectedEntries.map((e) => (
+                <EntryItem
+                  key={e.id}
+                  entry={e}
+                  planned={false}
+                  onSave={saveField}
+                  onToggle={toggleSettled}
+                  onCopy={copyToNext}
+                  onRemove={removeRow}
+                />
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setAddTarget('temp')}
+            className="w-full border-t border-slate-100 py-2.5 text-sm text-emerald-600 hover:bg-emerald-50"
+          >
+            ＋ 临时新款（不在预算内）
+          </button>
+        </div>
+      </div>
 
       {/* ===== 记一笔弹窗 ===== */}
-      {adding && (
+      {addTarget && (
         <AddSheet
-          unexpected={locked || tab === 'unexpected'}
-          locked={locked}
+          unexpected={addTarget === 'temp'}
+          locked={locked && addTarget === 'temp'}
           monthId={selectedId}
-          onClose={() => setAdding(false)}
+          onClose={() => setAddTarget(null)}
           onAdded={() => load(selectedId)}
           onError={setError}
         />
@@ -439,92 +454,37 @@ export function Account() {
   )
 }
 
-// ---- 切换按钮 ----
-function TabBtn({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
+// ---- 实际栏里“来自预算”的一行（只读镜像，可点“移出”取消勾选）----
+function CopiedRow({ entry: e, onRemove }: { entry: Entry; onRemove: () => void }) {
+  const isIncome = e.zone === 'income'
+  const color = isIncome ? 'text-emerald-600' : 'text-red-600'
+  const sign = isIncome ? '+' : '−'
   return (
-    <button
-      onClick={onClick}
-      className={
-        'rounded-xl py-2 text-sm font-semibold shadow-sm ' +
-        (active ? 'bg-amber-500 text-white' : 'bg-white text-slate-500')
-      }
-    >
-      {children}
-    </button>
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      <span className="text-xl">{iconFor(e)}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm text-slate-700">{e.description || '（未填说明）'}</div>
+        <div className="truncate text-[11px] text-slate-400">
+          来自预算{e.entry_date ? ' · ' + prettyDate(e.entry_date) : ''}
+        </div>
+      </div>
+      <span className={'shrink-0 text-sm font-semibold ' + color}>
+        {sign}
+        {formatMoney(e.amount)}
+      </span>
+      <button
+        onClick={onRemove}
+        className="no-print shrink-0 text-xs text-slate-400 hover:text-red-600"
+        title="从实际移出（取消勾选）"
+      >
+        移出
+      </button>
+    </div>
   )
 }
 
 const inputCls =
   'w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none'
-
-// ---- 一组（收入 或 支出）：带小计的卡片 ----
-function ZoneGroup({
-  title,
-  tone,
-  items,
-  subtotal,
-  planned,
-  frozen = false,
-  onSave,
-  onToggle,
-  onCopy,
-  onRemove,
-}: {
-  title: string
-  tone: 'income' | 'expense'
-  items: Entry[]
-  subtotal: number
-  planned: boolean
-  frozen?: boolean
-  onSave: (e: Entry, patch: Partial<Entry>) => void
-  onToggle: (e: Entry) => void
-  onCopy: (e: Entry) => void
-  onRemove: (id: string) => void
-}) {
-  const color = tone === 'income' ? 'text-emerald-600' : 'text-red-600'
-  const sign = tone === 'income' ? '+' : '−'
-  return (
-    <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-      {/* 组标题 + 小计 */}
-      <div className="flex items-center justify-between bg-slate-50 px-4 py-2">
-        <span className="text-sm font-bold text-slate-700">
-          {title}
-          <span className="ml-2 text-xs font-normal text-slate-400">{items.length} 笔</span>
-        </span>
-        <span className={'text-sm font-bold ' + color}>
-          {sign}
-          {formatMoney(subtotal)}
-        </span>
-      </div>
-      {items.length === 0 ? (
-        <div className="px-4 py-3 text-center text-xs text-slate-400">（无）</div>
-      ) : (
-        <div className="divide-y divide-slate-50">
-          {items.map((e) => (
-            <EntryItem
-              key={e.id}
-              entry={e}
-              planned={planned}
-              frozen={frozen}
-              onSave={onSave}
-              onToggle={onToggle}
-              onCopy={onCopy}
-              onRemove={onRemove}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ---- 一笔账：紧凑一行（图标 + 说明 + 金额 [+ 已实现圈]），点开展开编辑 ----
 function EntryItem({
@@ -605,7 +565,7 @@ function EntryItem({
           {sign}
           {formatMoney(e.amount)}
         </span>
-        {/* 规划项：右边一个圈，点一下打勾/取消 */}
+        {/* 预算项：右边一个圈，点一下＝加入实际现金流（再点取消）*/}
         {planned && (
           <button
             onClick={() => onToggle(e)}
@@ -615,7 +575,7 @@ function EntryItem({
                 ? 'border-emerald-500 bg-emerald-500 text-white'
                 : 'border-slate-300 text-transparent')
             }
-            title={e.settled ? '已实现（点击取消）' : '点一下：标记已实现'}
+            title={e.settled ? '已加入实际（点击移出）' : '点一下：加入实际现金流 →'}
           >
             ✓
           </button>
