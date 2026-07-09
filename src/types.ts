@@ -64,6 +64,7 @@ export interface SubItem {
 //   例：OT买饭 预算 2000，今天花 80、明天花 100 …
 export interface LogItem {
   date: string | null // 哪一天
+  desc?: string | null // 名称（可选，例如“麦当劳”“加班晚餐”）
   amount: number // 当天花了多少
 }
 

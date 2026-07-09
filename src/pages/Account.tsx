@@ -625,10 +625,14 @@ function EntryItem({
   const subTotal = sumAmounts(subs.map((s) => parseAmount(s.amount)))
   const draftIsIncome = draft.zone === 'income'
 
-  // 累计项：本地编辑状态（每天记录 date+amount）与开关
+  // 累计项：本地编辑状态（每天记录 date + 名称(可选) + amount）与开关
   const [running, setRunning] = useState(isRunning(e))
-  const [logs, setLogs] = useState<{ date: string; amount: string }[]>(
-    (e.actual_logs ?? []).map((l) => ({ date: l.date ?? '', amount: l.amount.toFixed(2) })),
+  const [logs, setLogs] = useState<{ date: string; desc: string; amount: string }[]>(
+    (e.actual_logs ?? []).map((l) => ({
+      date: l.date ?? '',
+      desc: l.desc ?? '',
+      amount: l.amount.toFixed(2),
+    })),
   )
   const spent = sumAmounts(logs.map((l) => parseAmount(l.amount))) // 已花
   const remaining = round2(parseAmount(draft.amount) - spent) // 剩余 = 预算 − 已花
@@ -644,7 +648,13 @@ function EntryItem({
     })
     setSubs((e.sub_items ?? []).map((s) => ({ desc: s.desc, amount: s.amount.toFixed(2) })))
     setRunning(isRunning(e))
-    setLogs((e.actual_logs ?? []).map((l) => ({ date: l.date ?? '', amount: l.amount.toFixed(2) })))
+    setLogs(
+      (e.actual_logs ?? []).map((l) => ({
+        date: l.date ?? '',
+        desc: l.desc ?? '',
+        amount: l.amount.toFixed(2),
+      })),
+    )
   }
   // 打开编辑（先把草稿对齐当前值）
   function openEditor() {
@@ -660,11 +670,15 @@ function EntryItem({
       zone: draft.zone,
     }
     if (running) {
-      // 累计项：预算金额=草稿金额，实际=每天记录
+      // 累计项：预算金额=草稿金额，实际=每天记录（名称可选）
       patch.amount = parseAmount(draft.amount)
       patch.sub_items = null
       patch.actual_logs = logs
-        .map((l) => ({ date: l.date || null, amount: parseAmount(l.amount) }))
+        .map((l) => ({
+          date: l.date || null,
+          desc: l.desc.trim() || null,
+          amount: parseAmount(l.amount),
+        }))
         .filter((l) => l.amount !== 0)
     } else if (subs.length > 0) {
       patch.sub_items = subs
@@ -704,6 +718,8 @@ function EntryItem({
 
   // 累计项：开/关 + 加/改/删每天记录
   function startRunning() {
+    // 如果是从「拆分」切过来，用拆分合计当预算金额
+    if (subs.length > 0) setDraft((d) => ({ ...d, amount: subTotal.toFixed(2) }))
     setRunning(true)
     setSubs([]) // 累计项不和拆分同时用
   }
@@ -712,9 +728,9 @@ function EntryItem({
     setLogs([])
   }
   function addLog() {
-    setLogs([...logs, { date: '', amount: '' }])
+    setLogs([...logs, { date: '', desc: '', amount: '' }])
   }
-  function updateLog(i: number, patch: Partial<{ date: string; amount: string }>) {
+  function updateLog(i: number, patch: Partial<{ date: string; desc: string; amount: string }>) {
     setLogs(logs.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
   }
   function removeLog(i: number) {
@@ -858,27 +874,36 @@ function EntryItem({
                   </div>
                 )}
                 {logs.map((l, i) => (
-                  <div key={i} className="mb-1 flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={l.date}
-                      onChange={(ev) => updateLog(i, { date: ev.target.value })}
-                      className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
-                    />
+                  <div key={i} className="mb-2 rounded border border-slate-200 p-1.5">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={l.date}
+                        onChange={(ev) => updateLog(i, { date: ev.target.value })}
+                        className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={l.amount}
+                        onChange={(ev) => updateLog(i, { amount: ev.target.value })}
+                        placeholder={t('金额', 'Amount')}
+                        className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                      <button
+                        onClick={() => removeLog(i)}
+                        className="shrink-0 text-slate-400 hover:text-red-600"
+                      >
+                        ✕
+                      </button>
+                    </div>
                     <input
                       type="text"
-                      inputMode="decimal"
-                      value={l.amount}
-                      onChange={(ev) => updateLog(i, { amount: ev.target.value })}
-                      placeholder={t('金额', 'Amount')}
-                      className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
+                      value={l.desc}
+                      onChange={(ev) => updateLog(i, { desc: ev.target.value })}
+                      placeholder={t('名称（可选，如 麦当劳）', 'Name (optional)')}
+                      className="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-xs focus:border-amber-500 focus:outline-none"
                     />
-                    <button
-                      onClick={() => removeLog(i)}
-                      className="shrink-0 text-slate-400 hover:text-red-600"
-                    >
-                      ✕
-                    </button>
                   </div>
                 ))}
                 <div className="mt-1 flex items-center justify-between">
@@ -969,6 +994,10 @@ function EntryItem({
                   </button>
                 </div>
               </div>
+              {/* 拆分模式下也能转成累计项 */}
+              <button onClick={startRunning} className="text-xs text-amber-600 hover:text-amber-800">
+                {t('＋ 改成累计项（多天分开记，如 OT买饭）', '＋ Make it running (log by day)')}
+              </button>
             </>
           )}
           <input

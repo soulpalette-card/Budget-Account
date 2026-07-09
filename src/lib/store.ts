@@ -216,7 +216,11 @@ export async function saveEntry(input: {
   const actualLogs: LogItem[] | null =
     input.actual_logs === undefined || input.actual_logs === null
       ? null
-      : input.actual_logs.map((l) => ({ date: l.date ?? null, amount: round2(l.amount ?? 0) }))
+      : input.actual_logs.map((l) => ({
+          date: l.date ?? null,
+          desc: l.desc ?? null,
+          amount: round2(l.amount ?? 0),
+        }))
 
   // 组装要写进数据库的字段，金额固定两位小数
   const row = {
