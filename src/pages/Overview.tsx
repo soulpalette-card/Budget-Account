@@ -200,14 +200,14 @@ export function Overview() {
                 {!r.exists && <span className="ml-2 text-[11px] text-slate-300">（未建·暂空）</span>}
               </span>
               <span className="text-right">
-                <span className="mr-1 text-xs text-slate-400">期末</span>
+                <span className="mr-1 text-xs text-slate-400">结余</span>
                 <span className={'font-extrabold ' + (r.closing < 0 ? 'text-red-600' : 'text-slate-900')}>
                   {formatMoney(r.closing)}
                 </span>
               </span>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-              <span className="text-slate-500">期初 {formatMoney(r.opening)}</span>
+              <span className="text-slate-500">承上结余 {formatMoney(r.opening)}</span>
               <span className="text-emerald-600">收 +{formatMoney(r.income)}</span>
               <span className="text-red-600">支 -{formatMoney(r.expense)}</span>
               <span className={r.net < 0 ? 'text-red-600' : 'text-emerald-600'}>
@@ -220,7 +220,7 @@ export function Overview() {
 
       {/* 期末余额折线图 */}
       <div className="rounded-2xl bg-white p-4 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-slate-700">期末余额走势</h3>
+        <h3 className="mb-2 text-sm font-semibold text-slate-700">结余走势</h3>
         <LineChart points={chartPoints} />
       </div>
 

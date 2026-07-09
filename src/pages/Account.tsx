@@ -295,8 +295,8 @@ export function Account() {
           </div>
         </div>
 
-        {/* 大数字：实际现金 */}
-        <div className="text-xs text-amber-900/80">实际现金（目前真实余额）</div>
+        {/* 大数字：实际结余（Actual Balance）*/}
+        <div className="text-xs text-amber-900/80">实际结余 · Actual Balance</div>
         <div
           className={
             'text-3xl font-extrabold ' + (calc.actualClosing < 0 ? 'text-red-700' : 'text-slate-900')
@@ -305,27 +305,27 @@ export function Account() {
           {formatMoney(calc.actualClosing)}
         </div>
 
-        {/* 本月支出 / 收入 + 计划/差距 */}
+        {/* 本月流入 / 流出 + 预算/差异 */}
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-lg bg-white/40 px-3 py-1.5">
-            <div className="text-xs text-amber-900/80">本月支出</div>
+            <div className="text-xs text-amber-900/80">本月流出 · Cash Out</div>
             <div className="font-bold text-red-700">-{formatMoney(calc.realizedExpense)}</div>
           </div>
           <div className="rounded-lg bg-white/40 px-3 py-1.5">
-            <div className="text-xs text-amber-900/80">本月收入</div>
+            <div className="text-xs text-amber-900/80">本月流入 · Cash In</div>
             <div className="font-bold text-emerald-700">+{formatMoney(calc.realizedIncome)}</div>
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between text-xs text-amber-900/90">
           <span>
-            计划现金 <b>{formatMoney(calc.plannedClosing)}</b>
+            预算结余 <b>{formatMoney(calc.plannedClosing)}</b>
           </span>
           <span>
-            差距{' '}
+            差异{' '}
             <b className={gap < 0 ? 'text-red-700' : 'text-emerald-800'}>{formatMoney(gap)}</b>
           </span>
           <span>
-            期初{' '}
+            承上结余{' '}
             {isFirstMonth ? (
               <input
                 type="text"
