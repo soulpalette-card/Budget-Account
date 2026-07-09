@@ -20,6 +20,7 @@ import { config } from '../config'
 import { formatMoney, parseAmount, round2, sumAmounts } from '../lib/money'
 import { friendlyError } from '../lib/errors'
 import { iconFor } from '../lib/icons'
+import { useI18n } from '../lib/i18n'
 
 function currentYm(): string {
   const d = new Date()
@@ -110,6 +111,7 @@ function computeRunning(
 }
 
 export function Account() {
+  const { t } = useI18n()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
@@ -254,7 +256,8 @@ export function Account() {
     }
   }
 
-  if (loading) return <div className="py-16 text-center text-slate-500">加载中…</div>
+  if (loading)
+    return <div className="py-16 text-center text-slate-500">{t('加载中…', 'Loading…')}</div>
 
   const locked = currentMonth?.budget_locked ?? false
 
@@ -291,9 +294,13 @@ export function Account() {
               'rounded-full px-3 py-1 text-xs font-medium ' +
               (locked ? 'bg-slate-700 text-white' : 'bg-white text-slate-600 border border-slate-300')
             }
-            title={locked ? '预算已锁定，点击解锁' : '点击锁定预算（锁定后新记的自动进临时新款）'}
+            title={
+              locked
+                ? t('预算已锁定，点击解锁', 'Budget locked — tap to unlock')
+                : t('点击锁定预算（锁定后新记的自动进临时新款）', 'Lock budget (new entries go to Extra)')
+            }
           >
-            {locked ? '🔒 已锁定' : '🔓 锁定预算'}
+            {locked ? t('🔒 已锁定', '🔒 Locked') : t('🔓 锁定预算', '🔓 Lock budget')}
           </button>
           <button onClick={() => window.print()} className="text-slate-500">
             🖨
@@ -308,9 +315,10 @@ export function Account() {
       <div className="rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 p-4 shadow-md">
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold text-slate-100">
-            📋 预算 Budget（计划）{locked && ' 🔒'}
+            📋 {t('预算 Budget（计划）', 'Budget (Plan)')}
+            {locked && ' 🔒'}
           </span>
-          <span className="text-xs text-slate-400">预算结余</span>
+          <span className="text-xs text-slate-400">{t('预算结余', 'Budget balance')}</span>
         </div>
         <div
           className={
@@ -322,11 +330,11 @@ export function Account() {
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-lg bg-white/10 px-3 py-1.5">
-            <div className="text-xs text-slate-300">预算流出 · Cash Out</div>
+            <div className="text-xs text-slate-300">{t('预算流出', 'Budget Out')} · Cash Out</div>
             <div className="font-bold text-rose-300">-{formatMoney(calc.plannedExpense)}</div>
           </div>
           <div className="rounded-lg bg-white/10 px-3 py-1.5">
-            <div className="text-xs text-slate-300">预算流入 · Cash In</div>
+            <div className="text-xs text-slate-300">{t('预算流入', 'Budget In')} · Cash In</div>
             <div className="font-bold text-emerald-300">+{formatMoney(calc.plannedIncome)}</div>
           </div>
         </div>
@@ -335,8 +343,10 @@ export function Account() {
       {/* ===== 窗口二：实际现金流（暖金，醇厚“到手钱”感）===== */}
       <div className="rounded-2xl bg-gradient-to-br from-amber-300 to-amber-500 p-4 shadow-md">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-amber-950">💵 实际现金流 Actual</span>
-          <span className="text-xs text-amber-900/80">实际结余</span>
+          <span className="text-sm font-semibold text-amber-950">
+            💵 {t('实际现金流 Actual', 'Actual Cash Flow')}
+          </span>
+          <span className="text-xs text-amber-900/80">{t('实际结余', 'Actual balance')}</span>
         </div>
         <div
           className={
@@ -348,16 +358,16 @@ export function Account() {
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-lg bg-white/40 px-3 py-1.5">
-            <div className="text-xs text-amber-900/80">本月流出 · Cash Out</div>
+            <div className="text-xs text-amber-900/80">{t('本月流出', 'Cash Out')} · Cash Out</div>
             <div className="font-bold text-red-700">-{formatMoney(calc.realizedExpense)}</div>
           </div>
           <div className="rounded-lg bg-white/40 px-3 py-1.5">
-            <div className="text-xs text-amber-900/80">本月流入 · Cash In</div>
+            <div className="text-xs text-amber-900/80">{t('本月流入', 'Cash In')} · Cash In</div>
             <div className="font-bold text-emerald-700">+{formatMoney(calc.realizedIncome)}</div>
           </div>
         </div>
         <div className="mt-2 text-right text-xs text-amber-900/90">
-          承上结余{' '}
+          {t('承上结余', 'Balance b/f')}{' '}
           {isFirstMonth ? (
             <input
               type="text"
@@ -380,7 +390,9 @@ export function Account() {
       {/* ===== 差异卡：差多少 + 哪里出问题 ===== */}
       <div className="rounded-2xl bg-white p-4 shadow-sm">
         {/* 标题 + 大数字：竖排，不再挤一行 */}
-        <div className="text-xs font-semibold text-slate-500">差异 Variance · 实际 − 预算</div>
+        <div className="text-xs font-semibold text-slate-500">
+          {t('差异 Variance · 实际 − 预算', 'Variance · Actual − Budget')}
+        </div>
         <div
           className={
             'text-2xl font-extrabold ' + (variance < 0 ? 'text-red-600' : 'text-emerald-600')
@@ -391,12 +403,15 @@ export function Account() {
         </div>
 
         <div className="mt-3 space-y-2 border-t border-slate-100 pt-2 text-xs">
-          <div className="text-slate-400">差异从哪来 👇</div>
+          <div className="text-slate-400">{t('差异从哪来 👇', 'Where the gap comes from 👇')}</div>
           {/* 每行：标签左（可换行）＋ 金额右上对齐 */}
           <div className="flex items-start justify-between gap-3">
             <span className="min-w-0 text-slate-500">
-              🔸 未实现预算 · {unsettled.length} 笔
-              <span className="block text-[11px] text-slate-400">（计划了还没发生）</span>
+              🔸 {t('未实现预算', 'Budget not yet realized')} · {unsettled.length}{' '}
+              {t('笔', '')}
+              <span className="block text-[11px] text-slate-400">
+                {t('（计划了还没发生）', '(planned, not happened yet)')}
+              </span>
             </span>
             <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500">
               {compactNum(unsettledNet)}
@@ -404,8 +419,10 @@ export function Account() {
           </div>
           <div className="flex items-start justify-between gap-3">
             <span className="min-w-0 text-slate-500">
-              🔹 临时新款 · {unexpectedEntries.length} 笔
-              <span className="block text-[11px] text-slate-400">（计划外冒出来）</span>
+              🔹 {t('临时新款', 'Extra items')} · {unexpectedEntries.length} {t('笔', '')}
+              <span className="block text-[11px] text-slate-400">
+                {t('（计划外冒出来）', '(unplanned)')}
+              </span>
             </span>
             <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500">
               {compactNum(tempNet)}
@@ -418,14 +435,16 @@ export function Account() {
       <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
         {/* 表头 */}
         <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-500">
-          <span>项目 {locked && '🔒已锁'}</span>
-          <span className="text-right">预算</span>
-          <span className="text-right">实际 ✓</span>
+          <span>
+            {t('项目', 'Item')} {locked && (t('🔒已锁', '🔒 Locked'))}
+          </span>
+          <span className="text-right">{t('预算', 'Budget')}</span>
+          <span className="text-right">{t('实际', 'Actual')} ✓</span>
         </div>
 
         {plannedEntries.length === 0 && unexpectedEntries.length === 0 ? (
           <div className="px-4 py-6 text-center text-xs text-slate-400">
-            还没有记录，点下面「＋ 加预算项」或「＋ 临时新款」
+            {t('还没有记录，点下面「＋ 加预算项」或「＋ 临时新款」', 'No records yet — tap “＋ Budget item” or “＋ Extra” below')}
           </div>
         ) : (
           <div className="divide-y divide-slate-50">
@@ -445,7 +464,7 @@ export function Account() {
             {/* 临时新款：只有实际列有数 */}
             {unexpectedEntries.length > 0 && (
               <div className="bg-emerald-50/60 px-3 py-1 text-[11px] font-semibold text-emerald-700">
-                临时新款（不在预算内）
+                {t('临时新款（不在预算内）', 'Extra items (not in budget)')}
               </div>
             )}
             {unexpectedEntries.map((e) => (
@@ -464,7 +483,7 @@ export function Account() {
 
         {/* 合计（净）*/}
         <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold">
-          <span className="text-slate-700">合计（收−支）</span>
+          <span className="text-slate-700">{t('合计（收−支）', 'Total (In−Out)')}</span>
           <span className="text-right tabular-nums text-slate-400">
             {compactNum(calc.plannedIncome - calc.plannedExpense)}
           </span>
@@ -485,7 +504,7 @@ export function Account() {
               onClick={() => setAddTarget('budget')}
               className="flex-1 py-2.5 text-amber-600 hover:bg-amber-50"
             >
-              ＋ 加预算项
+              {t('＋ 加预算项', '＋ Budget item')}
             </button>
           )}
           <button
@@ -495,7 +514,7 @@ export function Account() {
               (!locked ? 'border-l border-slate-100' : '')
             }
           >
-            ＋ 临时新款
+            {t('＋ 临时新款', '＋ Extra')}
           </button>
         </div>
       </div>
@@ -546,6 +565,7 @@ function EntryItem({
   onCopy: (e: Entry) => void
   onRemove: (id: string) => void
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const isIncome = e.zone === 'income'
   const amtColor = isIncome ? 'text-emerald-600' : 'text-red-600'
@@ -595,12 +615,14 @@ function EntryItem({
           <span className="text-base">{iconFor(e)}</span>
           <span className="min-w-0">
             <span className="block truncate text-sm text-slate-700">
-              {e.description || '（未填说明）'}
+              {e.description || t('（未填说明）', '(no description)')}
             </span>
             <span className="block truncate text-[10px] text-slate-400">
-              {e.category || (isIncome ? '收入' : '支出')}
+              {e.category || (isIncome ? t('收入', 'Income') : t('支出', 'Expense'))}
               {e.entry_date ? ' · ' + prettyDate(e.entry_date) : ''}
-              {e.sub_items && e.sub_items.length > 0 ? ` · ${e.sub_items.length}项` : ''}
+              {e.sub_items && e.sub_items.length > 0
+                ? ` · ${e.sub_items.length}${t('项', ' items')}`
+                : ''}
             </span>
           </span>
         </button>
@@ -618,7 +640,7 @@ function EntryItem({
             <button
               onClick={() => onToggle(e)}
               className={'no-print font-semibold ' + amtColor}
-              title="已加入实际（点击移出）"
+              title={t('已加入实际（点击移出）', 'In actual (tap to remove)')}
             >
               {signed}
             </button>
@@ -626,9 +648,9 @@ function EntryItem({
             <button
               onClick={() => onToggle(e)}
               className="no-print rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-400 hover:border-emerald-400 hover:text-emerald-600"
-              title="点一下：加入实际"
+              title={t('点一下：加入实际', 'Tap to add to actual')}
             >
-              ＋加入
+              {t('＋加入', '＋Add')}
             </button>
           )}
         </div>
@@ -637,7 +659,12 @@ function EntryItem({
       {/* 展开态：预算锁定时只读；否则可编辑 */}
       {open && frozen && (
         <div className="space-y-1 bg-slate-50 px-4 py-3 text-xs text-slate-500">
-          <div>🔒 预算已锁定，这笔规划不能改。要修改请先点顶部「已锁定」解锁。</div>
+          <div>
+            {t(
+              '🔒 预算已锁定，这笔规划不能改。要修改请先点顶部「已锁定」解锁。',
+              '🔒 Budget locked — this item can’t be edited. Unlock at the top first.',
+            )}
+          </div>
           {e.sub_items && e.sub_items.length > 0 && (
             <div className="mt-1 space-y-0.5">
               {e.sub_items.map((s, i) => (
@@ -650,7 +677,7 @@ function EntryItem({
           )}
           <div className="pt-1 text-right">
             <button onClick={() => onCopy(e)} className="text-amber-600 hover:text-amber-800">
-              复制到下月
+              {t('复制到下月', 'Copy to next month')}
             </button>
           </div>
         </div>
@@ -686,7 +713,7 @@ function EntryItem({
                 onClick={startSplit}
                 className="text-xs text-amber-600 hover:text-amber-800"
               >
-                ＋ 拆分成明细（一笔里有多张单据）
+                {t('＋ 拆分成明细（一笔里有多张单据）', '＋ Split into items (multiple receipts)')}
               </button>
             </>
           ) : (
@@ -703,9 +730,9 @@ function EntryItem({
               />
               <div className="rounded-md border border-slate-200 bg-white p-2">
                 <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
-                  <span>明细（自动加总）</span>
+                  <span>{t('明细（自动加总）', 'Items (auto-summed)')}</span>
                   <span className="font-semibold text-slate-700">
-                    合计 {formatMoney(subTotal)}
+                    {t('合计', 'Total')} {formatMoney(subTotal)}
                   </span>
                 </div>
                 {subs.map((s, i) => (
@@ -724,7 +751,7 @@ function EntryItem({
                       value={s.amount}
                       onChange={(ev) => updateSub(i, { amount: ev.target.value })}
                       onBlur={() => commitSubs(subs)}
-                      placeholder="金额"
+                      placeholder={t('金额', 'Amount')}
                       className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
                     />
                     <button
@@ -737,10 +764,10 @@ function EntryItem({
                 ))}
                 <div className="mt-1 flex items-center justify-between">
                   <button onClick={addSub} className="text-xs text-amber-600 hover:text-amber-800">
-                    ＋ 加一项
+                    {t('＋ 加一项', '＋ Add item')}
                   </button>
                   <button onClick={cancelSplit} className="text-xs text-slate-400 hover:text-slate-600">
-                    取消拆分（合并回一笔）
+                    {t('取消拆分（合并回一笔）', 'Cancel split (merge back)')}
                   </button>
                 </div>
               </div>
@@ -749,7 +776,7 @@ function EntryItem({
           <input
             type="text"
             defaultValue={e.description ?? ''}
-            placeholder="说明…"
+            placeholder={t('说明…', 'Description…')}
             onBlur={(ev) => {
               const v = ev.target.value || null
               if (v !== e.description) onSave(e, { description: v })
@@ -762,7 +789,7 @@ function EntryItem({
               onChange={(ev) => onSave(e, { category: ev.target.value || null })}
               className={inputCls + ' flex-1'}
             >
-              <option value="">（未分类）</option>
+              <option value="">{t('（未分类）', '(No category)')}</option>
               {config.categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -773,15 +800,15 @@ function EntryItem({
               onClick={() => onSave(e, { zone: isIncome ? 'expense' : 'income' })}
               className="shrink-0 rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
             >
-              {isIncome ? '改为支出' : '改为收入'}
+              {isIncome ? t('改为支出', 'To Expense') : t('改为收入', 'To Income')}
             </button>
           </div>
           <div className="flex items-center justify-end gap-4 text-xs">
             <button onClick={() => onCopy(e)} className="text-amber-600 hover:text-amber-800">
-              复制到下月
+              {t('复制到下月', 'Copy to next month')}
             </button>
             <button onClick={() => onRemove(e.id)} className="text-slate-400 hover:text-red-600">
-              删除
+              {t('删除', 'Delete')}
             </button>
           </div>
         </div>
@@ -806,6 +833,7 @@ function AddSheet({
   onAdded: () => void
   onError: (msg: string) => void
 }) {
+  const { t } = useI18n()
   const [dir, setDir] = useState<'expense' | 'income'>('expense') // 支出 / 收入
   const [amount, setAmount] = useState('')
   const [desc, setDesc] = useState('')
@@ -816,7 +844,7 @@ function AddSheet({
   async function save() {
     const amt = parseAmount(amount)
     if (amt <= 0) {
-      onError('请填一个大于 0 的金额。')
+      onError(t('请填一个大于 0 的金额。', 'Please enter an amount greater than 0.'))
       return
     }
     setBusy(true)
@@ -849,7 +877,8 @@ function AddSheet({
       <div className="w-full max-w-md rounded-t-2xl bg-white p-4 shadow-xl sm:rounded-2xl">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-bold text-slate-800">
-            记一笔{unexpected ? '（临时增加）' : '（规划）'}
+            {t('记一笔', 'New entry')}
+            {unexpected ? t('（临时新款）', ' (Extra)') : t('（规划）', ' (Budget)')}
           </span>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
             ✕
@@ -857,7 +886,7 @@ function AddSheet({
         </div>
         {locked && (
           <div className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            🔒 预算已锁定，这笔会记入「临时增加」。
+            {t('🔒 预算已锁定，这笔会记入「临时新款」。', '🔒 Budget locked — this goes to “Extra”.')}
           </div>
         )}
 
@@ -870,7 +899,7 @@ function AddSheet({
               (dir === 'expense' ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500')
             }
           >
-            支出
+            {t('支出', 'Expense')}
           </button>
           <button
             onClick={() => setDir('income')}
@@ -879,7 +908,7 @@ function AddSheet({
               (dir === 'income' ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500')
             }
           >
-            收入
+            {t('收入', 'Income')}
           </button>
         </div>
 
@@ -890,7 +919,7 @@ function AddSheet({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             onKeyDown={onKey}
-            placeholder="金额"
+            placeholder={t('金额', 'Amount')}
             autoFocus
             className={inputCls + ' text-right text-lg'}
           />
@@ -899,7 +928,7 @@ function AddSheet({
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             onKeyDown={onKey}
-            placeholder="说明（例如：房租 / 卖货收入）"
+            placeholder={t('说明（例如：房租 / 卖货收入）', 'Description (e.g. Rent / Sales)')}
             className={inputCls}
           />
           <div className="grid grid-cols-2 gap-2">
@@ -908,7 +937,7 @@ function AddSheet({
               onChange={(e) => setCategory(e.target.value)}
               className={inputCls}
             >
-              <option value="">分类…</option>
+              <option value="">{t('分类…', 'Category…')}</option>
               {config.categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -928,7 +957,7 @@ function AddSheet({
             disabled={busy}
             className="w-full rounded-lg bg-amber-500 py-2.5 font-bold text-white hover:bg-amber-600 disabled:opacity-50"
           >
-            保存
+            {t('保存', 'Save')}
           </button>
         </div>
       </div>

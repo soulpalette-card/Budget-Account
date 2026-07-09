@@ -7,9 +7,11 @@
 
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useI18n } from '../lib/i18n'
 
 export function Layout() {
   const { user, signOut } = useAuth()
+  const { t, lang, toggle } = useI18n()
   const navigate = useNavigate()
 
   // 点“登出”：登出后回到登录页
@@ -29,27 +31,37 @@ export function Layout() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-4">
-            <span className="text-lg font-bold text-slate-800">UNIKOYO 现金流预算</span>
+            <span className="text-lg font-bold text-slate-800">
+              {t('UNIKOYO 现金流预算', 'UNIKOYO Cash Flow')}
+            </span>
             <nav className="flex gap-1">
               <NavLink to="/" end className={linkClass}>
-                账户
+                {t('账户', 'Account')}
               </NavLink>
               <NavLink to="/overview" className={linkClass}>
-                6个月总览
+                {t('6个月总览', '6-Month')}
               </NavLink>
               <NavLink to="/settings" className={linkClass}>
-                设置
+                {t('设置', 'Settings')}
               </NavLink>
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            {/* 中英文切换 */}
+            <button
+              onClick={toggle}
+              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              title={t('切换到英文', 'Switch to Chinese')}
+            >
+              {lang === 'zh' ? 'EN' : '中'}
+            </button>
             {/* 显示当前登录的邮箱 */}
             <span className="hidden text-sm text-slate-500 sm:inline">{user?.email}</span>
             <button
               onClick={handleSignOut}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
             >
-              登出
+              {t('登出', 'Sign out')}
             </button>
           </div>
         </div>
