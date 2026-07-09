@@ -271,49 +271,81 @@ export function Account() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 pb-24">
-      {/* ===== 金黄仪表盘 ===== */}
-      <div className="rounded-2xl bg-gradient-to-br from-amber-300 to-yellow-400 p-4 shadow-sm">
-        <div className="mb-2 flex items-center justify-between text-sm text-amber-900">
-          <select
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="no-print rounded-md bg-white/40 px-2 py-1 font-medium text-amber-900 focus:outline-none"
+      {/* ===== 顶部工具条：月份 + 锁定 + 列印 ===== */}
+      <div className="no-print flex items-center justify-between gap-2">
+        <select
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-medium focus:outline-none"
+        >
+          {months.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleLock}
+            className={
+              'rounded-full px-3 py-1 text-xs font-medium ' +
+              (locked ? 'bg-slate-700 text-white' : 'bg-white text-slate-600 border border-slate-300')
+            }
+            title={locked ? '预算已锁定，点击解锁' : '点击锁定预算（锁定后新记的自动进临时新款）'}
           >
-            {months.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <div className="flex items-center gap-2">
-            {/* 锁定 / 解锁预算 */}
-            <button
-              onClick={toggleLock}
-              className={
-                'no-print rounded-full px-2 py-0.5 text-xs font-medium ' +
-                (locked ? 'bg-amber-900 text-white' : 'bg-white/60 text-amber-900')
-              }
-              title={locked ? '预算已锁定，点击解锁' : '点击锁定预算（锁定后新记的自动进临时增加）'}
-            >
-              {locked ? '🔒 已锁定' : '🔓 锁定预算'}
-            </button>
-            <button onClick={() => window.print()} className="no-print text-amber-900">
-              🖨
-            </button>
-          </div>
+            {locked ? '🔒 已锁定' : '🔓 锁定预算'}
+          </button>
+          <button onClick={() => window.print()} className="text-slate-500">
+            🖨
+          </button>
         </div>
+      </div>
 
-        {/* 大数字：实际结余（Actual Balance）*/}
-        <div className="text-xs text-amber-900/80">实际结余 · Actual Balance</div>
+      {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {msg && <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</div>}
+
+      {/* ===== 窗口一：预算（灰色）===== */}
+      <div className="rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-bold text-slate-600">
+            📋 预算 Budget（计划）{locked && ' 🔒'}
+          </span>
+          <span className="text-xs text-slate-500">预算结余</span>
+        </div>
         <div
           className={
-            'text-3xl font-extrabold ' + (calc.actualClosing < 0 ? 'text-red-700' : 'text-slate-900')
+            'text-3xl font-extrabold ' +
+            (calc.plannedClosing < 0 ? 'text-red-600' : 'text-emerald-700')
+          }
+        >
+          {formatMoney(calc.plannedClosing)}
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-lg bg-white/70 px-3 py-1.5">
+            <div className="text-xs text-slate-500">预算流出 · Cash Out</div>
+            <div className="font-bold text-red-600">-{formatMoney(calc.plannedExpense)}</div>
+          </div>
+          <div className="rounded-lg bg-white/70 px-3 py-1.5">
+            <div className="text-xs text-slate-500">预算流入 · Cash In</div>
+            <div className="font-bold text-emerald-600">+{formatMoney(calc.plannedIncome)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ===== 窗口二：实际现金流（黄色）===== */}
+      <div className="rounded-2xl bg-gradient-to-br from-amber-300 to-yellow-400 p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-bold text-amber-900">💵 实际现金流 Actual</span>
+          <span className="text-xs text-amber-900/80">实际结余</span>
+        </div>
+        <div
+          className={
+            'text-3xl font-extrabold ' +
+            (calc.actualClosing < 0 ? 'text-red-700' : 'text-emerald-800')
           }
         >
           {formatMoney(calc.actualClosing)}
         </div>
-
-        {/* 本月流入 / 流出 + 预算/差异 */}
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-lg bg-white/40 px-3 py-1.5">
             <div className="text-xs text-amber-900/80">本月流出 · Cash Out</div>
@@ -324,56 +356,39 @@ export function Account() {
             <div className="font-bold text-emerald-700">+{formatMoney(calc.realizedIncome)}</div>
           </div>
         </div>
-        <div className="mt-2 flex items-center justify-end text-xs text-amber-900/90">
-          <span>
-            承上结余{' '}
-            {isFirstMonth ? (
-              <input
-                type="text"
-                inputMode="decimal"
-                key={selectedId + '-' + calc.opening}
-                defaultValue={calc.opening.toFixed(2)}
-                onBlur={(e) => {
-                  const v = parseAmount(e.target.value)
-                  e.target.value = v.toFixed(2)
-                  if (v !== calc.opening) saveOpening(v)
-                }}
-                className="w-20 rounded bg-white/50 px-1 py-0.5 text-right text-amber-900 focus:outline-none"
-              />
-            ) : (
-              <b>{formatMoney(calc.opening)}</b>
-            )}
-          </span>
+        <div className="mt-2 text-right text-xs text-amber-900/90">
+          承上结余{' '}
+          {isFirstMonth ? (
+            <input
+              type="text"
+              inputMode="decimal"
+              key={selectedId + '-' + calc.opening}
+              defaultValue={calc.opening.toFixed(2)}
+              onBlur={(e) => {
+                const v = parseAmount(e.target.value)
+                e.target.value = v.toFixed(2)
+                if (v !== calc.opening) saveOpening(v)
+              }}
+              className="w-20 rounded bg-white/50 px-1 py-0.5 text-right text-amber-900 focus:outline-none"
+            />
+          ) : (
+            <b>{formatMoney(calc.opening)}</b>
+          )}
         </div>
       </div>
 
-      {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {msg && <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</div>}
-
-      {/* ===== 重点：预算 vs 实际 vs 差异（本月净流）===== */}
+      {/* ===== 差异卡：差多少 + 哪里出问题 ===== */}
       <div className="rounded-2xl bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div>
-            <div className="text-xs text-slate-400">预算 Budget</div>
-            <div className="text-lg font-bold text-slate-400">{compactNum(budgetNet)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">实际 Actual</div>
-            <div className={'text-lg font-bold ' + (actualNet < 0 ? 'text-red-600' : 'text-emerald-600')}>
-              {compactNum(actualNet)}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500">差异 Variance</div>
-            <div className={'text-lg font-bold ' + (variance < 0 ? 'text-red-600' : 'text-emerald-600')}>
-              {variance >= 0 ? '+' : '-'}
-              {compactNum(Math.abs(variance))}
-            </div>
-          </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-bold text-slate-700">差异 Variance（实际 − 预算）</span>
+          <span
+            className={'text-xl font-extrabold ' + (variance < 0 ? 'text-red-600' : 'text-emerald-600')}
+          >
+            {variance >= 0 ? '+' : '-'}
+            {compactNum(Math.abs(variance))}
+          </span>
         </div>
-
-        {/* 哪里出问题：差异 = 临时新款 − 未实现预算 */}
-        <div className="mt-3 space-y-1 border-t border-slate-100 pt-2 text-xs">
+        <div className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-xs">
           <div className="mb-1 text-slate-400">差异从哪来 👇</div>
           <div className="flex items-center justify-between">
             <span className="text-slate-500">
