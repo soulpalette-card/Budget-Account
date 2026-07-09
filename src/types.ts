@@ -46,6 +46,7 @@ export interface Entry {
   settled: boolean // ✅ 打勾：这笔“规划项”是否已按规划实现（实际发生了）
   is_unexpected: boolean // 是否“意外项”：true=不在规划内的临时收支；false=月初就规划好的
   sub_items: SubItem[] | null // 子项目/明细（拆单）；为空就是普通一笔
+  actual_logs: LogItem[] | null // 累计项：每天的实际花费；非空=累计项，实际=这些之和
   note: string | null // 备注栏
   is_deleted: boolean // 软删除标记：true = 已删（但没真删，可恢复）
   created_at: string // 创建时间
@@ -57,6 +58,13 @@ export interface Entry {
 export interface SubItem {
   desc: string // 小项目说明，例如“复印机”“电话费”
   amount: number // 小项目金额
+}
+
+// 「累计项」里每天的一笔实际花费（预算不变，实际按天累加）
+//   例：OT买饭 预算 2000，今天花 80、明天花 100 …
+export interface LogItem {
+  date: string | null // 哪一天
+  amount: number // 当天花了多少
 }
 
 // recurring_templates 表：每月自动重复的项目（房租、薪资这种）

@@ -17,6 +17,7 @@ import { supabase } from './supabase'
 import type {
   Confidence,
   Entry,
+  LogItem,
   Month,
   RecurringTemplate,
   SubItem,
@@ -195,6 +196,7 @@ export async function saveEntry(input: {
   settled?: boolean
   is_unexpected?: boolean
   sub_items?: SubItem[] | null
+  actual_logs?: LogItem[] | null
   note?: string | null
 }): Promise<Entry> {
   const userId = await getUserId()
@@ -210,6 +212,12 @@ export async function saveEntry(input: {
     amount = round2(subItems.reduce((sum, s) => sum + s.amount, 0)) // 主金额 = 子项目合计
   }
 
+  // 累计项的每天实际记录（预算金额不变，这里只是存实际花费）
+  const actualLogs: LogItem[] | null =
+    input.actual_logs === undefined || input.actual_logs === null
+      ? null
+      : input.actual_logs.map((l) => ({ date: l.date ?? null, amount: round2(l.amount ?? 0) }))
+
   // 组装要写进数据库的字段，金额固定两位小数
   const row = {
     user_id: userId, // 记录“谁建的”（现在数据共享，这只是留个痕迹，不再限制可见范围）
@@ -223,6 +231,7 @@ export async function saveEntry(input: {
     settled: input.settled ?? false,
     is_unexpected: input.is_unexpected ?? false, // 是否意外项（默认否=规划项）
     sub_items: subItems, // 子项目明细（jsonb），为空就是普通一笔
+    actual_logs: actualLogs, // 累计项的每天实际记录（jsonb），为空就是普通一笔
     note: input.note ?? null,
   }
 

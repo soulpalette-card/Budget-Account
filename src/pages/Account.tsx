@@ -62,6 +62,22 @@ interface MonthCalc {
   realizedCount: number
 }
 
+// ---- 一笔账的“实际”金额 ----
+//   累计项(actual_logs 非空)：实际 = 每天记录之和
+//   意外项：实际 = 金额（本来就发生了）
+//   普通预算项：打了勾(settled)才算实际，否则为 0
+export function isRunning(e: Entry): boolean {
+  return Array.isArray(e.actual_logs)
+}
+export function spentOf(e: Entry): number {
+  return isRunning(e) ? sumAmounts((e.actual_logs ?? []).map((l) => l.amount)) : 0
+}
+export function actualOf(e: Entry): number {
+  if (isRunning(e)) return spentOf(e)
+  if (e.is_unexpected) return e.amount
+  return e.settled ? e.amount : 0
+}
+
 function computeRunning(
   months: Month[],
   byMonth: Record<string, Entry[]>,
@@ -70,6 +86,7 @@ function computeRunning(
   let carry: number | null = null
   for (const m of months) {
     const es = (byMonth[m.id] ?? []).filter((e) => !e.is_deleted)
+    // 预算(planned)＝各项预算金额；实际(realized)＝各项 actualOf 之和
     const plannedIncome = sumAmounts(
       es.filter((e) => !e.is_unexpected && e.zone === 'income').map((e) => e.amount),
     )
@@ -82,12 +99,8 @@ function computeRunning(
     const unexpExpense = sumAmounts(
       es.filter((e) => e.is_unexpected && e.zone === 'expense').map((e) => e.amount),
     )
-    const realizedIncome = sumAmounts(
-      es.filter((e) => e.zone === 'income' && (e.is_unexpected || e.settled)).map((e) => e.amount),
-    )
-    const realizedExpense = sumAmounts(
-      es.filter((e) => e.zone === 'expense' && (e.is_unexpected || e.settled)).map((e) => e.amount),
-    )
+    const realizedIncome = sumAmounts(es.filter((e) => e.zone === 'income').map(actualOf))
+    const realizedExpense = sumAmounts(es.filter((e) => e.zone === 'expense').map(actualOf))
     const planned = es.filter((e) => !e.is_unexpected)
     const opening = carry === null ? round2(m.opening_balance) : carry
     const plannedClosing = round2(opening + plannedIncome - plannedExpense)
@@ -193,6 +206,7 @@ export function Account() {
         settled: entry.settled,
         is_unexpected: entry.is_unexpected,
         sub_items: patch.sub_items !== undefined ? patch.sub_items : entry.sub_items,
+        actual_logs: patch.actual_logs !== undefined ? patch.actual_logs : entry.actual_logs,
         note: entry.note,
       })
       load(selectedId)
@@ -244,6 +258,9 @@ export function Account() {
         confidence: entry.confidence,
         is_unexpected: entry.is_unexpected,
         settled: false,
+        sub_items: entry.sub_items,
+        // 累计项复制到下月：保留“累计”属性但清空每天记录（重新开始记）
+        actual_logs: entry.actual_logs ? [] : null,
         note: entry.note,
       })
       setMsg(`已复制「${entry.description ?? '这笔'}」到「${target.label}」。`)
@@ -262,11 +279,13 @@ export function Account() {
   const budgetNet = round2(calc.plannedIncome - calc.plannedExpense)
   const actualNet = round2(calc.realizedIncome - calc.realizedExpense)
   const variance = round2(actualNet - budgetNet) // 差异 = 实际 − 预算
-  const unsettled = plannedEntries.filter((e) => !e.settled) // 未实现的预算项
-  const unsettledNet = round2(
-    sumAmounts(unsettled.filter((e) => e.zone === 'income').map((e) => e.amount)) -
-      sumAmounts(unsettled.filter((e) => e.zone === 'expense').map((e) => e.amount)),
+  // 未实现/未花的预算：预算项里 实际 ≠ 预算 的那些（含累计项没花满的部分）
+  const unsettled = plannedEntries.filter((e) => actualOf(e) !== e.amount)
+  const plannedRealizedNet = round2(
+    sumAmounts(plannedEntries.filter((e) => e.zone === 'income').map(actualOf)) -
+      sumAmounts(plannedEntries.filter((e) => e.zone === 'expense').map(actualOf)),
   )
+  const unsettledNet = round2(budgetNet - plannedRealizedNet) // 预算里还没变成实际的部分
   const tempNet = round2(calc.unexpIncome - calc.unexpExpense) // 临时新款净额
 
   return (
@@ -606,6 +625,14 @@ function EntryItem({
   const subTotal = sumAmounts(subs.map((s) => parseAmount(s.amount)))
   const draftIsIncome = draft.zone === 'income'
 
+  // 累计项：本地编辑状态（每天记录 date+amount）与开关
+  const [running, setRunning] = useState(isRunning(e))
+  const [logs, setLogs] = useState<{ date: string; amount: string }[]>(
+    (e.actual_logs ?? []).map((l) => ({ date: l.date ?? '', amount: l.amount.toFixed(2) })),
+  )
+  const spent = sumAmounts(logs.map((l) => parseAmount(l.amount))) // 已花
+  const remaining = round2(parseAmount(draft.amount) - spent) // 剩余 = 预算 − 已花
+
   // 把草稿还原成当前记录的值（打开/取消时用）
   function resetDraft() {
     setDraft({
@@ -616,6 +643,8 @@ function EntryItem({
       zone: e.zone,
     })
     setSubs((e.sub_items ?? []).map((s) => ({ desc: s.desc, amount: s.amount.toFixed(2) })))
+    setRunning(isRunning(e))
+    setLogs((e.actual_logs ?? []).map((l) => ({ date: l.date ?? '', amount: l.amount.toFixed(2) })))
   }
   // 打开编辑（先把草稿对齐当前值）
   function openEditor() {
@@ -630,13 +659,22 @@ function EntryItem({
       category: draft.category || null,
       zone: draft.zone,
     }
-    if (subs.length > 0) {
+    if (running) {
+      // 累计项：预算金额=草稿金额，实际=每天记录
+      patch.amount = parseAmount(draft.amount)
+      patch.sub_items = null
+      patch.actual_logs = logs
+        .map((l) => ({ date: l.date || null, amount: parseAmount(l.amount) }))
+        .filter((l) => l.amount !== 0)
+    } else if (subs.length > 0) {
       patch.sub_items = subs
         .map((s) => ({ desc: s.desc.trim(), amount: parseAmount(s.amount) }))
         .filter((s) => s.amount !== 0 || s.desc !== '')
+      patch.actual_logs = null
     } else {
       patch.amount = parseAmount(draft.amount)
       patch.sub_items = null
+      patch.actual_logs = null
     }
     onSave(e, patch)
     setOpen(false)
@@ -662,6 +700,25 @@ function EntryItem({
   }
   function cancelSplit() {
     setSubs([])
+  }
+
+  // 累计项：开/关 + 加/改/删每天记录
+  function startRunning() {
+    setRunning(true)
+    setSubs([]) // 累计项不和拆分同时用
+  }
+  function stopRunning() {
+    setRunning(false)
+    setLogs([])
+  }
+  function addLog() {
+    setLogs([...logs, { date: '', amount: '' }])
+  }
+  function updateLog(i: number, patch: Partial<{ date: string; amount: string }>) {
+    setLogs(logs.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
+  }
+  function removeLog(i: number) {
+    setLogs(logs.filter((_, idx) => idx !== i))
   }
 
   return (
@@ -691,6 +748,7 @@ function EntryItem({
             </span>
             <span className="block truncate text-[10px] text-slate-400">
               {e.category || (isIncome ? t('收入', 'Income') : t('支出', 'Expense'))}
+              {isRunning(e) ? ` · ${t('累计', 'Running')}` : ''}
               {e.sub_items && e.sub_items.length > 0
                 ? ` · ${e.sub_items.length}${t('项', ' items')}`
                 : ''}
@@ -703,9 +761,20 @@ function EntryItem({
           {planned ? signed : '—'}
         </span>
 
-        {/* 实际列：临时新款直接显示；预算项点一下才加入（○ / 金额）*/}
+        {/* 实际列 */}
         <div className="text-right text-xs tabular-nums">
-          {!planned ? (
+          {isRunning(e) ? (
+            // 累计项：显示已花，下面小字显示剩余，点开去加每天记录
+            <button onClick={openEditor} className="no-print text-right">
+              <span className={'font-semibold ' + amtColor}>
+                {isIncome ? '+' : '-'}
+                {compactNum(spentOf(e))}
+              </span>
+              <span className="block text-[9px] text-slate-400">
+                {t('剩', 'Left')} {compactNum(round2(e.amount - spentOf(e)))}
+              </span>
+            </button>
+          ) : !planned ? (
             <span className={'font-semibold ' + amtColor}>{signed}</span>
           ) : e.settled ? (
             <button
@@ -755,7 +824,74 @@ function EntryItem({
       )}
       {open && !frozen && (
         <div className="space-y-2 bg-slate-50 px-4 py-3">
-          {subs.length === 0 ? (
+          {running ? (
+            <>
+              {/* 累计项：预算金额固定，实际按天记录 */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="mb-0.5 text-[10px] text-slate-400">{t('预算金额', 'Budget')}</div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.amount}
+                    onChange={(ev) => setDraft({ ...draft, amount: ev.target.value })}
+                    placeholder={t('预算金额', 'Budget')}
+                    className={inputCls + ' text-right'}
+                  />
+                </div>
+                <div className="rounded-md bg-white px-2 py-1 text-right text-xs">
+                  <div className="text-slate-500">
+                    {t('已花', 'Spent')} <b className={amtColor}>{formatMoney(spent)}</b>
+                  </div>
+                  <div className={remaining < 0 ? 'text-red-600' : 'text-emerald-600'}>
+                    {t('剩', 'Left')} <b>{formatMoney(remaining)}</b>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-2">
+                <div className="mb-1 text-xs font-semibold text-slate-500">
+                  {t('实际花费（按天记）', 'Actual spend (by day)')}
+                </div>
+                {logs.length === 0 && (
+                  <div className="mb-1 text-[11px] text-slate-400">
+                    {t('还没记录，点「＋ 记一天」', 'No logs yet — tap “＋ Add a day”')}
+                  </div>
+                )}
+                {logs.map((l, i) => (
+                  <div key={i} className="mb-1 flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={l.date}
+                      onChange={(ev) => updateLog(i, { date: ev.target.value })}
+                      className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={l.amount}
+                      onChange={(ev) => updateLog(i, { amount: ev.target.value })}
+                      placeholder={t('金额', 'Amount')}
+                      className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => removeLog(i)}
+                      className="shrink-0 text-slate-400 hover:text-red-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div className="mt-1 flex items-center justify-between">
+                  <button onClick={addLog} className="text-xs text-amber-600 hover:text-amber-800">
+                    {t('＋ 记一天', '＋ Add a day')}
+                  </button>
+                  <button onClick={stopRunning} className="text-xs text-slate-400 hover:text-slate-600">
+                    {t('改回一次性', 'Back to one-off')}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : subs.length === 0 ? (
             <>
               {/* 普通模式：日期 + 金额（改动只进草稿，点 ✅ 才存）*/}
               <div className="grid grid-cols-2 gap-2">
@@ -774,9 +910,14 @@ function EntryItem({
                   className={inputCls + ' text-right'}
                 />
               </div>
-              <button onClick={startSplit} className="text-xs text-amber-600 hover:text-amber-800">
-                {t('＋ 拆分成明细（一笔里有多张单据）', '＋ Split into items (multiple receipts)')}
-              </button>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <button onClick={startSplit} className="text-xs text-amber-600 hover:text-amber-800">
+                  {t('＋ 拆分成明细（一笔里有多张单据）', '＋ Split (multiple receipts)')}
+                </button>
+                <button onClick={startRunning} className="text-xs text-amber-600 hover:text-amber-800">
+                  {t('＋ 改成累计项（多天分开记，如 OT买饭）', '＋ Make it running (log by day)')}
+                </button>
+              </div>
             </>
           ) : (
             <>
