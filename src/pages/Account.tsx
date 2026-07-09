@@ -256,8 +256,18 @@ export function Account() {
 
   if (loading) return <div className="py-16 text-center text-slate-500">加载中…</div>
 
-  const gap = round2(calc.actualClosing - calc.plannedClosing)
   const locked = currentMonth?.budget_locked ?? false
+
+  // 预算 vs 实际（本月净流，收−支），以及差异从哪来
+  const budgetNet = round2(calc.plannedIncome - calc.plannedExpense)
+  const actualNet = round2(calc.realizedIncome - calc.realizedExpense)
+  const variance = round2(actualNet - budgetNet) // 差异 = 实际 − 预算
+  const unsettled = plannedEntries.filter((e) => !e.settled) // 未实现的预算项
+  const unsettledNet = round2(
+    sumAmounts(unsettled.filter((e) => e.zone === 'income').map((e) => e.amount)) -
+      sumAmounts(unsettled.filter((e) => e.zone === 'expense').map((e) => e.amount)),
+  )
+  const tempNet = round2(calc.unexpIncome - calc.unexpExpense) // 临时新款净额
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 pb-24">
@@ -314,14 +324,7 @@ export function Account() {
             <div className="font-bold text-emerald-700">+{formatMoney(calc.realizedIncome)}</div>
           </div>
         </div>
-        <div className="mt-2 flex items-center justify-between text-xs text-amber-900/90">
-          <span>
-            预算结余 <b>{formatMoney(calc.plannedClosing)}</b>
-          </span>
-          <span>
-            差异{' '}
-            <b className={gap < 0 ? 'text-red-700' : 'text-emerald-800'}>{formatMoney(gap)}</b>
-          </span>
+        <div className="mt-2 flex items-center justify-end text-xs text-amber-900/90">
           <span>
             承上结余{' '}
             {isFirstMonth ? (
@@ -346,6 +349,46 @@ export function Account() {
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {msg && <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</div>}
+
+      {/* ===== 重点：预算 vs 实际 vs 差异（本月净流）===== */}
+      <div className="rounded-2xl bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div className="text-xs text-slate-400">预算 Budget</div>
+            <div className="text-lg font-bold text-slate-400">{compactNum(budgetNet)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">实际 Actual</div>
+            <div className={'text-lg font-bold ' + (actualNet < 0 ? 'text-red-600' : 'text-emerald-600')}>
+              {compactNum(actualNet)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">差异 Variance</div>
+            <div className={'text-lg font-bold ' + (variance < 0 ? 'text-red-600' : 'text-emerald-600')}>
+              {variance >= 0 ? '+' : '-'}
+              {compactNum(Math.abs(variance))}
+            </div>
+          </div>
+        </div>
+
+        {/* 哪里出问题：差异 = 临时新款 − 未实现预算 */}
+        <div className="mt-3 space-y-1 border-t border-slate-100 pt-2 text-xs">
+          <div className="mb-1 text-slate-400">差异从哪来 👇</div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500">
+              🔸 未实现预算（计划了还没发生）· {unsettled.length} 笔
+            </span>
+            <span className="tabular-nums text-slate-500">{compactNum(unsettledNet)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500">
+              🔹 临时新款（计划外冒出来）· {unexpectedEntries.length} 笔
+            </span>
+            <span className="tabular-nums text-slate-500">{compactNum(tempNet)}</span>
+          </div>
+        </div>
+      </div>
 
       {/* ===== 一行对照表：项目 ｜ 预算 ｜ 实际（手机也能左右对照）===== */}
       <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
@@ -398,7 +441,7 @@ export function Account() {
         {/* 合计（净）*/}
         <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold">
           <span className="text-slate-700">合计（收−支）</span>
-          <span className="text-right tabular-nums text-slate-600">
+          <span className="text-right tabular-nums text-slate-400">
             {compactNum(calc.plannedIncome - calc.plannedExpense)}
           </span>
           <span
@@ -538,8 +581,8 @@ function EntryItem({
           </span>
         </button>
 
-        {/* 预算列：预算项显示金额；临时新款显示 — */}
-        <span className={'text-right text-xs tabular-nums ' + (planned ? amtColor : 'text-slate-300')}>
+        {/* 预算列：一律灰色（还没发生的计划）；临时新款没有预算，显示 — */}
+        <span className={'text-right text-xs tabular-nums ' + (planned ? 'text-slate-400' : 'text-slate-300')}>
           {planned ? signed : '—'}
         </span>
 
