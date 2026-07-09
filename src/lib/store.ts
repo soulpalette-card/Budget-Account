@@ -19,6 +19,7 @@ import type {
   Entry,
   Month,
   RecurringTemplate,
+  SubItem,
   TemplateKind,
   Zone,
 } from '../types'
@@ -193,9 +194,21 @@ export async function saveEntry(input: {
   confidence?: Confidence | null
   settled?: boolean
   is_unexpected?: boolean
+  sub_items?: SubItem[] | null
   note?: string | null
 }): Promise<Entry> {
   const userId = await getUserId()
+
+  // 处理子项目（拆单）：有子项目时，金额自动 = 所有子项目之和
+  let amount = round2(input.amount ?? 0)
+  let subItems: SubItem[] | null = null
+  if (input.sub_items && input.sub_items.length > 0) {
+    subItems = input.sub_items.map((s) => ({
+      desc: s.desc ?? '',
+      amount: round2(s.amount ?? 0),
+    }))
+    amount = round2(subItems.reduce((sum, s) => sum + s.amount, 0)) // 主金额 = 子项目合计
+  }
 
   // 组装要写进数据库的字段，金额固定两位小数
   const row = {
@@ -203,12 +216,13 @@ export async function saveEntry(input: {
     month_id: input.month_id,
     zone: input.zone,
     entry_date: input.entry_date ?? null,
-    amount: round2(input.amount ?? 0),
+    amount,
     category: input.category ?? null,
     description: input.description ?? null,
     confidence: input.confidence ?? null,
     settled: input.settled ?? false,
     is_unexpected: input.is_unexpected ?? false, // 是否意外项（默认否=规划项）
+    sub_items: subItems, // 子项目明细（jsonb），为空就是普通一笔
     note: input.note ?? null,
   }
 

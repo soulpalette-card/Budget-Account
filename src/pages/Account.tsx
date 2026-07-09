@@ -190,6 +190,7 @@ export function Account() {
         confidence: entry.confidence,
         settled: entry.settled,
         is_unexpected: entry.is_unexpected,
+        sub_items: patch.sub_items !== undefined ? patch.sub_items : entry.sub_items,
         note: entry.note,
       })
       load(selectedId)
@@ -516,6 +517,41 @@ function EntryItem({
   const amtColor = !realized ? 'text-slate-300' : isIncome ? 'text-emerald-600' : 'text-red-600'
   const sign = isIncome ? '+' : '−'
 
+  // 子项目（拆单）本地编辑状态：金额先用字符串存，方便输入
+  const [subs, setSubs] = useState<{ desc: string; amount: string }[]>(
+    (e.sub_items ?? []).map((s) => ({ desc: s.desc, amount: s.amount.toFixed(2) })),
+  )
+  const subTotal = sumAmounts(subs.map((s) => parseAmount(s.amount)))
+
+  // 存子项目到数据库（有子项目时，主金额自动=合计）
+  function commitSubs(list: { desc: string; amount: string }[]) {
+    const items = list
+      .map((s) => ({ desc: s.desc.trim(), amount: parseAmount(s.amount) }))
+      .filter((s) => s.amount !== 0 || s.desc !== '')
+    onSave(e, { sub_items: items.length ? items : null })
+  }
+  // 开始拆分：把当前这一笔变成第一个子项目
+  function startSplit() {
+    const seeded = [{ desc: e.description || '明细1', amount: e.amount.toFixed(2) }]
+    setSubs(seeded)
+    commitSubs(seeded)
+  }
+  function addSub() {
+    setSubs([...subs, { desc: '', amount: '' }])
+  }
+  function updateSub(i: number, patch: Partial<{ desc: string; amount: string }>) {
+    setSubs(subs.map((s, idx) => (idx === i ? { ...s, ...patch } : s)))
+  }
+  function removeSub(i: number) {
+    const next = subs.filter((_, idx) => idx !== i)
+    setSubs(next)
+    commitSubs(next)
+  }
+  function cancelSplit() {
+    setSubs([])
+    onSave(e, { sub_items: null }) // 合并回一笔，金额保持当前合计
+  }
+
   return (
     <div>
       {/* 收起态：一小行 */}
@@ -528,6 +564,7 @@ function EntryItem({
           <span className="truncate text-[11px] text-slate-400">
             {e.category || (isIncome ? '收入' : '支出')}
             {e.entry_date ? ' · ' + prettyDate(e.entry_date) : ''}
+            {e.sub_items && e.sub_items.length > 0 ? ` · ${e.sub_items.length}项明细` : ''}
           </span>
         </button>
         <span className={'shrink-0 text-sm font-semibold ' + amtColor}>
@@ -554,28 +591,95 @@ function EntryItem({
       {/* 展开态：编辑 */}
       {open && (
         <div className="space-y-2 bg-slate-50 px-4 py-3">
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              defaultValue={e.entry_date ?? ''}
-              onBlur={(ev) => {
-                const v = ev.target.value || null
-                if (v !== e.entry_date) onSave(e, { entry_date: v })
-              }}
-              className={inputCls}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              defaultValue={e.amount.toFixed(2)}
-              onBlur={(ev) => {
-                const v = parseAmount(ev.target.value)
-                ev.target.value = v.toFixed(2)
-                if (v !== e.amount) onSave(e, { amount: v })
-              }}
-              className={inputCls + ' text-right'}
-            />
-          </div>
+          {subs.length === 0 ? (
+            <>
+              {/* 普通模式：日期 + 金额 */}
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="date"
+                  defaultValue={e.entry_date ?? ''}
+                  onBlur={(ev) => {
+                    const v = ev.target.value || null
+                    if (v !== e.entry_date) onSave(e, { entry_date: v })
+                  }}
+                  className={inputCls}
+                />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  defaultValue={e.amount.toFixed(2)}
+                  onBlur={(ev) => {
+                    const v = parseAmount(ev.target.value)
+                    ev.target.value = v.toFixed(2)
+                    if (v !== e.amount) onSave(e, { amount: v })
+                  }}
+                  className={inputCls + ' text-right'}
+                />
+              </div>
+              <button
+                onClick={startSplit}
+                className="text-xs text-amber-600 hover:text-amber-800"
+              >
+                ＋ 拆分成明细（一笔里有多张单据）
+              </button>
+            </>
+          ) : (
+            <>
+              {/* 拆分模式：日期 + 子项目列表（自动加总）*/}
+              <input
+                type="date"
+                defaultValue={e.entry_date ?? ''}
+                onBlur={(ev) => {
+                  const v = ev.target.value || null
+                  if (v !== e.entry_date) onSave(e, { entry_date: v })
+                }}
+                className={inputCls}
+              />
+              <div className="rounded-md border border-slate-200 bg-white p-2">
+                <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                  <span>明细（自动加总）</span>
+                  <span className="font-semibold text-slate-700">
+                    合计 {formatMoney(subTotal)}
+                  </span>
+                </div>
+                {subs.map((s, i) => (
+                  <div key={i} className="mb-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={s.desc}
+                      onChange={(ev) => updateSub(i, { desc: ev.target.value })}
+                      onBlur={() => commitSubs(subs)}
+                      placeholder="小项目 如 复印机 / 电话费"
+                      className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={s.amount}
+                      onChange={(ev) => updateSub(i, { amount: ev.target.value })}
+                      onBlur={() => commitSubs(subs)}
+                      placeholder="金额"
+                      className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => removeSub(i)}
+                      className="shrink-0 text-slate-400 hover:text-red-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div className="mt-1 flex items-center justify-between">
+                  <button onClick={addSub} className="text-xs text-amber-600 hover:text-amber-800">
+                    ＋ 加一项
+                  </button>
+                  <button onClick={cancelSplit} className="text-xs text-slate-400 hover:text-slate-600">
+                    取消拆分（合并回一笔）
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
           <input
             type="text"
             defaultValue={e.description ?? ''}

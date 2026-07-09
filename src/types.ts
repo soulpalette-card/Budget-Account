@@ -44,9 +44,18 @@ export interface Entry {
   confidence: Confidence | null // 把握度（主要给收入用）
   settled: boolean // ✅ 打勾：这笔“规划项”是否已按规划实现（实际发生了）
   is_unexpected: boolean // 是否“意外项”：true=不在规划内的临时收支；false=月初就规划好的
+  sub_items: SubItem[] | null // 子项目/明细（拆单）；为空就是普通一笔
   note: string | null // 备注栏
   is_deleted: boolean // 软删除标记：true = 已删（但没真删，可恢复）
   created_at: string // 创建时间
+}
+
+// 一笔账里的「子项目/明细」：一张大单据拆成几张小单据
+//   例：一笔 office expenses 9150 = 复印机 5000 + 电话费 4150
+//   有子项目时，这笔账的 amount 会自动等于所有子项目金额之和。
+export interface SubItem {
+  desc: string // 小项目说明，例如“复印机”“电话费”
+  amount: number // 小项目金额
 }
 
 // recurring_templates 表：每月自动重复的项目（房租、薪资这种）

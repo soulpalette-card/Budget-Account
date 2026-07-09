@@ -323,21 +323,35 @@ function DetailGroup({
       </div>
       <div className="divide-y divide-slate-100">
         {items.map((e) => (
-          <div key={e.id} className="flex items-center gap-3 px-4 py-2">
-            <span className="text-lg">{iconFor(e)}</span>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm text-slate-700">
-                {e.description || '（未填说明）'}
+          <div key={e.id} className="px-4 py-2">
+            <div className="flex items-center gap-3">
+              <span className="text-lg">{iconFor(e)}</span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-slate-700">
+                  {e.description || '（未填说明）'}
+                </div>
+                <div className="truncate text-[11px] text-slate-400">
+                  {(e.category || (tone === 'income' ? '收入' : '支出')) + ' · ' + prettyDate(e.entry_date)}
+                  {e.is_unexpected ? ' · 意外' : e.settled ? ' · ✅已实现' : ' · 待实现'}
+                  {e.sub_items && e.sub_items.length > 0 ? ` · ${e.sub_items.length}项明细` : ''}
+                </div>
               </div>
-              <div className="truncate text-[11px] text-slate-400">
-                {(e.category || (tone === 'income' ? '收入' : '支出')) + ' · ' + prettyDate(e.entry_date)}
-                {e.is_unexpected ? ' · 意外' : e.settled ? ' · ✅已实现' : ' · 待实现'}
-              </div>
+              <span className={'shrink-0 text-sm font-semibold ' + color}>
+                {sign}
+                {formatMoney(e.amount)}
+              </span>
             </div>
-            <span className={'shrink-0 text-sm font-semibold ' + color}>
-              {sign}
-              {formatMoney(e.amount)}
-            </span>
+            {/* 子项目明细（拆单）：缩进列出 */}
+            {e.sub_items && e.sub_items.length > 0 && (
+              <div className="ml-9 mt-1 space-y-0.5">
+                {e.sub_items.map((s, i) => (
+                  <div key={i} className="flex justify-between text-[11px] text-slate-400">
+                    <span className="truncate">· {s.desc || '（未填）'}</span>
+                    <span className="shrink-0">{formatMoney(s.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
