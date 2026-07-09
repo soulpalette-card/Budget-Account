@@ -155,6 +155,14 @@ export function Account() {
   const allEntries = (byMonth[selectedId] ?? []).filter((e) => !e.is_deleted)
   const plannedEntries = allEntries.filter((e) => !e.is_unexpected) // 预算项
   const unexpectedEntries = allEntries.filter((e) => e.is_unexpected) // 临时新款
+  // 按日期排序（没填日期的排最后）
+  const byDate = (a: Entry, b: Entry) => {
+    const da = a.entry_date ?? '9999-99-99'
+    const db = b.entry_date ?? '9999-99-99'
+    return da < db ? -1 : da > db ? 1 : 0
+  }
+  const incomeRows = allEntries.filter((e) => e.zone === 'income').sort(byDate) // 收入框
+  const expenseRows = allEntries.filter((e) => e.zone === 'expense').sort(byDate) // 支出框
   const calc =
     calcMap[selectedId] ??
     ({
@@ -406,92 +414,44 @@ export function Account() {
         </div>
       </div>
 
-      {/* ===== 一行对照表：项目 ｜ 预算 ｜ 实际（手机也能左右对照）===== */}
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-        {/* 表头 */}
-        <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-500">
-          <span>
-            {t('项目', 'Item')} {locked && (t('🔒已锁', '🔒 Locked'))}
-          </span>
-          <span className="text-right">{t('预算', 'Budget')}</span>
-          <span className="text-right">{t('实际', 'Actual')} ✓</span>
-        </div>
+      {/* ===== 收入框 / 支出框：分开、按日期排序 ===== */}
+      <ZoneBox
+        title={t('收入 Income', 'Income')}
+        tone="income"
+        rows={incomeRows}
+        budgetSub={calc.plannedIncome}
+        actualSub={calc.realizedIncome}
+        onSave={saveField}
+        onToggle={toggleSettled}
+        onCopy={copyToNext}
+        onRemove={removeRow}
+      />
+      <ZoneBox
+        title={t('支出 Expense', 'Expense')}
+        tone="expense"
+        rows={expenseRows}
+        budgetSub={calc.plannedExpense}
+        actualSub={calc.realizedExpense}
+        onSave={saveField}
+        onToggle={toggleSettled}
+        onCopy={copyToNext}
+        onRemove={removeRow}
+      />
 
-        {plannedEntries.length === 0 && unexpectedEntries.length === 0 ? (
-          <div className="px-4 py-6 text-center text-xs text-slate-400">
-            {t('还没有记录，点下面「＋ 加预算项」或「＋ 临时新款」', 'No records yet — tap “＋ Budget item” or “＋ Extra” below')}
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-50">
-            {/* 预算项：预算列有数，实际列点一下才加入 */}
-            {plannedEntries.map((e) => (
-              <EntryItem
-                key={e.id}
-                entry={e}
-                planned
-                frozen={locked}
-                onSave={saveField}
-                onToggle={toggleSettled}
-                onCopy={copyToNext}
-                onRemove={removeRow}
-              />
-            ))}
-            {/* 临时新款：只有实际列有数 */}
-            {unexpectedEntries.length > 0 && (
-              <div className="bg-emerald-50/60 px-3 py-1 text-[11px] font-semibold text-emerald-700">
-                {t('临时新款（不在预算内）', 'Extra items (not in budget)')}
-              </div>
-            )}
-            {unexpectedEntries.map((e) => (
-              <EntryItem
-                key={e.id}
-                entry={e}
-                planned={false}
-                onSave={saveField}
-                onToggle={toggleSettled}
-                onCopy={copyToNext}
-                onRemove={removeRow}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* 合计（净）*/}
-        <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold">
-          <span className="text-slate-700">{t('合计（收−支）', 'Total (In−Out)')}</span>
-          <span className="text-right tabular-nums text-slate-400">
-            {compactNum(calc.plannedIncome - calc.plannedExpense)}
-          </span>
-          <span
-            className={
-              'text-right tabular-nums ' +
-              (calc.realizedIncome - calc.realizedExpense < 0 ? 'text-red-600' : 'text-emerald-600')
-            }
-          >
-            {compactNum(calc.realizedIncome - calc.realizedExpense)}
-          </span>
-        </div>
-
-        {/* 添加按钮 */}
-        <div className="flex border-t border-slate-100 text-sm">
-          {!locked && (
-            <button
-              onClick={() => setAddTarget('budget')}
-              className="flex-1 py-2.5 text-amber-600 hover:bg-amber-50"
-            >
-              {t('＋ 加预算项', '＋ Budget item')}
-            </button>
-          )}
-          <button
-            onClick={() => setAddTarget('temp')}
-            className={
-              'flex-1 py-2.5 text-emerald-600 hover:bg-emerald-50 ' +
-              (!locked ? 'border-l border-slate-100' : '')
-            }
-          >
-            {t('＋ 临时新款', '＋ Extra')}
-          </button>
-        </div>
+      {/* 添加按钮 */}
+      <div className="flex overflow-hidden rounded-2xl bg-white text-sm shadow-sm">
+        <button
+          onClick={() => setAddTarget('budget')}
+          className="flex-1 py-2.5 text-amber-600 hover:bg-amber-50"
+        >
+          {t('＋ 加预算项', '＋ Budget item')}
+        </button>
+        <button
+          onClick={() => setAddTarget('temp')}
+          className="flex-1 border-l border-slate-100 py-2.5 text-emerald-600 hover:bg-emerald-50"
+        >
+          {t('＋ 临时新款', '＋ Extra')}
+        </button>
       </div>
 
       {/* ===== 记一笔弹窗 ===== */}
@@ -521,6 +481,91 @@ function compactNum(n: number): string {
 
 const inputCls =
   'w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none'
+
+// ---- 收入框 / 支出框：一个框只放一种，按日期排好，底部带小计 ----
+function ZoneBox({
+  title,
+  tone,
+  rows,
+  budgetSub,
+  actualSub,
+  onSave,
+  onToggle,
+  onCopy,
+  onRemove,
+}: {
+  title: string
+  tone: 'income' | 'expense'
+  rows: Entry[]
+  budgetSub: number
+  actualSub: number
+  onSave: (e: Entry, patch: Partial<Entry>) => void
+  onToggle: (e: Entry) => void
+  onCopy: (e: Entry) => void
+  onRemove: (id: string) => void
+}) {
+  const { t } = useI18n()
+  const isInc = tone === 'income'
+  const color = isInc ? 'text-emerald-600' : 'text-red-600'
+  const sgn = isInc ? '+' : '-'
+  return (
+    <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+      {/* 框标题 + 列名 */}
+      <div
+        className={
+          'grid grid-cols-[1fr_5rem_5rem] items-center gap-1 px-3 py-2 ' +
+          (isInc ? 'bg-emerald-50' : 'bg-red-50')
+        }
+      >
+        <span className={'text-sm font-bold ' + (isInc ? 'text-emerald-700' : 'text-red-700')}>
+          {title}
+          <span className="ml-1 text-[11px] font-normal text-slate-400">
+            {rows.length} {t('笔', '')}
+          </span>
+        </span>
+        <span className="text-right text-[11px] font-semibold text-slate-500">
+          {t('预算', 'Budget')}
+        </span>
+        <span className="text-right text-[11px] font-semibold text-slate-500">
+          {t('实际', 'Actual')} ✓
+        </span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="px-4 py-5 text-center text-xs text-slate-400">
+          {t('还没有记录', 'No records yet')}
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {rows.map((e) => (
+            <EntryItem
+              key={e.id}
+              entry={e}
+              planned={!e.is_unexpected}
+              onSave={onSave}
+              onToggle={onToggle}
+              onCopy={onCopy}
+              onRemove={onRemove}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* 小计 */}
+      <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 border-t border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold">
+        <span className="text-slate-700">{t('小计', 'Subtotal')}</span>
+        <span className="text-right tabular-nums text-slate-400">
+          {sgn}
+          {compactNum(budgetSub)}
+        </span>
+        <span className={'text-right tabular-nums ' + color}>
+          {sgn}
+          {compactNum(actualSub)}
+        </span>
+      </div>
+    </div>
+  )
+}
 
 // ---- 一笔账：紧凑一行（图标 + 说明 + 金额 [+ 已实现圈]），点开展开编辑 ----
 function EntryItem({
@@ -630,12 +675,22 @@ function EntryItem({
         >
           <span className="text-base">{iconFor(e)}</span>
           <span className="min-w-0">
+            {/* 日期明显显示：橙色小标签 */}
+            <span className="mb-0.5 flex items-center gap-1">
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                {e.entry_date ? prettyDate(e.entry_date) : t('无日期', 'No date')}
+              </span>
+              {e.is_unexpected && (
+                <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+                  {t('临时', 'Extra')}
+                </span>
+              )}
+            </span>
             <span className="block truncate text-sm text-slate-700">
               {e.description || t('（未填说明）', '(no description)')}
             </span>
             <span className="block truncate text-[10px] text-slate-400">
               {e.category || (isIncome ? t('收入', 'Income') : t('支出', 'Expense'))}
-              {e.entry_date ? ' · ' + prettyDate(e.entry_date) : ''}
               {e.sub_items && e.sub_items.length > 0
                 ? ` · ${e.sub_items.length}${t('项', ' items')}`
                 : ''}
@@ -663,7 +718,7 @@ function EntryItem({
           ) : (
             <button
               onClick={() => onToggle(e)}
-              className="no-print rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-400 hover:border-emerald-400 hover:text-emerald-600"
+              className="no-print rounded bg-slate-500 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-600"
               title={t('点一下：加入实际', 'Tap to add to actual')}
             >
               {t('＋加入', '＋Add')}
