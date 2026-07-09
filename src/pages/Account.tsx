@@ -839,7 +839,7 @@ function EntryItem({
         </div>
       )}
       {open && !frozen && (
-        <div className="space-y-2 border-l-4 border-amber-400 bg-amber-50/70 px-4 py-3">
+        <div className="space-y-2 border-l-8 border-amber-500 bg-amber-100 px-4 py-3">
           {running ? (
             <>
               {/* 累计项：预算金额固定，实际按天记录 */}
@@ -879,8 +879,8 @@ function EntryItem({
                     className={
                       'mb-2 rounded border p-1.5 ' +
                       (i % 2 === 0
-                        ? 'border-sky-200 bg-sky-50'
-                        : 'border-emerald-200 bg-emerald-50')
+                        ? 'border-sky-400 bg-sky-200'
+                        : 'border-emerald-400 bg-emerald-200')
                     }
                   >
                     <div className="flex items-center gap-2">
@@ -973,7 +973,7 @@ function EntryItem({
                     key={i}
                     className={
                       'mb-1 flex items-center gap-2 rounded px-1.5 py-1 ' +
-                      (i % 2 === 0 ? 'bg-sky-50' : 'bg-emerald-50')
+                      (i % 2 === 0 ? 'bg-sky-200' : 'bg-emerald-200')
                     }
                   >
                     <input
