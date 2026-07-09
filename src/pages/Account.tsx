@@ -19,6 +19,7 @@ import type { Entry, Month } from '../types'
 import { config } from '../config'
 import { formatMoney, parseAmount, round2, sumAmounts } from '../lib/money'
 import { friendlyError } from '../lib/errors'
+import { iconFor } from '../lib/icons'
 
 function currentYm(): string {
   const d = new Date()
@@ -36,24 +37,6 @@ function nextLabel(label: string): string {
     return `${y}-${String(mo).padStart(2, '0')}`
   }
   return label + '-下月'
-}
-
-// 分类 → 小图标（找不到就按收入/支出给个默认）
-const CATEGORY_ICON: Record<string, string> = {
-  薪资: '💰',
-  房租: '🏠',
-  水电网络: '💡',
-  原料采购: '📦',
-  设备: '🛠️',
-  市场推广: '📣',
-  交通: '🚗',
-  税费: '🧾',
-  销售收入: '🛒',
-  其他: '📌',
-}
-function iconFor(e: Entry): string {
-  if (e.category && CATEGORY_ICON[e.category]) return CATEGORY_ICON[e.category]
-  return e.zone === 'income' ? '💵' : '💸'
 }
 
 // 把 "2026-07-08" 变成 "7月8日"；空的显示“未定日期”

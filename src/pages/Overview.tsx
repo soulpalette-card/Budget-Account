@@ -17,6 +17,7 @@ import type { Entry, Month } from '../types'
 import { formatMoney, round2, sumAmounts } from '../lib/money'
 import { friendlyError } from '../lib/errors'
 import { LineChart } from '../components/LineChart'
+import { iconFor } from '../lib/icons'
 
 // "YYYY-MM" 加 n 个月
 function ymAdd(label: string, n: number): string {
@@ -45,6 +46,17 @@ export function Overview() {
   const [months, setMonths] = useState<Month[]>([])
   const [byMonth, setByMonth] = useState<Record<string, Entry[]>>({})
   const [startLabel, setStartLabel] = useState('')
+  const [openLabels, setOpenLabels] = useState<Set<string>>(new Set()) // 展开了哪些月
+
+  // 点某个月：展开/收起它的明细
+  function toggleOpen(label: string) {
+    setOpenLabels((prev) => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
 
   useEffect(() => {
     let alive = true
@@ -91,6 +103,18 @@ export function Overview() {
     }
     return map
   }, [sorted, byMonth])
+
+  // label → 月份对象（点开明细时用它找出这个月的记录）
+  const monthByLabel = useMemo(() => {
+    const map: Record<string, Month> = {}
+    for (const m of months) map[m.label] = m
+    return map
+  }, [months])
+  function entriesForLabel(label: string): Entry[] {
+    const m = monthByLabel[label]
+    if (!m) return []
+    return (byMonth[m.id] ?? []).filter((e) => !e.is_deleted)
+  }
 
   const earliest = sorted[0]?.label ?? ''
   const latest = sorted[sorted.length - 1]?.label ?? ''
@@ -190,32 +214,48 @@ export function Overview() {
         </div>
       </div>
 
-      {/* 6 个月卡片 */}
+      {/* 6 个月卡片（点标题展开该月明细） */}
       <div className="space-y-2">
-        {rows.map((r) => (
-          <div key={r.label} className="rounded-2xl bg-white p-3 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-800">
-                {r.label}
-                {!r.exists && <span className="ml-2 text-[11px] text-slate-300">（未建·暂空）</span>}
-              </span>
-              <span className="text-right">
-                <span className="mr-1 text-xs text-slate-400">结余</span>
-                <span className={'font-extrabold ' + (r.closing < 0 ? 'text-red-600' : 'text-slate-900')}>
-                  {formatMoney(r.closing)}
-                </span>
-              </span>
+        {rows.map((r) => {
+          const open = openLabels.has(r.label)
+          return (
+            <div key={r.label} className="overflow-hidden rounded-2xl bg-white shadow-sm">
+              {/* 卡片头：点一下展开/收起 */}
+              <button onClick={() => toggleOpen(r.label)} className="w-full p-3 text-left">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800">
+                    <span className="mr-1 text-slate-300">{open ? '▾' : '▸'}</span>
+                    {r.label}
+                    {!r.exists && (
+                      <span className="ml-2 text-[11px] text-slate-300">（未建·暂空）</span>
+                    )}
+                  </span>
+                  <span className="text-right">
+                    <span className="mr-1 text-xs text-slate-400">结余</span>
+                    <span
+                      className={
+                        'font-extrabold ' + (r.closing < 0 ? 'text-red-600' : 'text-slate-900')
+                      }
+                    >
+                      {formatMoney(r.closing)}
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                  <span className="text-slate-500">承上结余 {formatMoney(r.opening)}</span>
+                  <span className="text-emerald-600">收 +{formatMoney(r.income)}</span>
+                  <span className="text-red-600">支 -{formatMoney(r.expense)}</span>
+                  <span className={r.net < 0 ? 'text-red-600' : 'text-emerald-600'}>
+                    净 {formatMoney(r.net)}
+                  </span>
+                </div>
+              </button>
+
+              {/* 展开：这个月的完整现金流明细 */}
+              {open && <MonthDetailInline entries={entriesForLabel(r.label)} />}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-              <span className="text-slate-500">承上结余 {formatMoney(r.opening)}</span>
-              <span className="text-emerald-600">收 +{formatMoney(r.income)}</span>
-              <span className="text-red-600">支 -{formatMoney(r.expense)}</span>
-              <span className={r.net < 0 ? 'text-red-600' : 'text-emerald-600'}>
-                净 {formatMoney(r.net)}
-              </span>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* 期末余额折线图 */}
@@ -225,9 +265,82 @@ export function Overview() {
       </div>
 
       <p className="px-1 text-xs text-slate-400">
-        这里把每个月【所有】记录都算进去（不分打勾没打勾），是“大盘预测”。
-        想逐笔打勾对比计划 vs 实际，去「账户」页。
+        点任意一个月可展开当月完整明细。这里把每个月【所有】记录都算进去（不分打勾），是“大盘预测”。
+        想逐笔打勾、编辑，去「账户」页。
       </p>
+    </div>
+  )
+}
+
+// "2026-07-08" → "7月8日"
+function prettyDate(d: string | null): string {
+  if (!d) return '无日期'
+  const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return m ? `${Number(m[2])}月${Number(m[3])}日` : d
+}
+
+// ---- 展开的当月明细（只读）：收入组 + 支出组，各带小计 ----
+function MonthDetailInline({ entries }: { entries: Entry[] }) {
+  if (entries.length === 0) {
+    return (
+      <div className="border-t border-slate-100 px-4 py-3 text-center text-xs text-slate-400">
+        这个月还没有明细（去「账户」页记一笔）。
+      </div>
+    )
+  }
+  const income = entries.filter((e) => e.zone === 'income')
+  const expense = entries.filter((e) => e.zone === 'expense')
+
+  return (
+    <div className="border-t border-slate-100 bg-slate-50/60">
+      <DetailGroup title="收入" tone="income" items={income} />
+      <DetailGroup title="支出" tone="expense" items={expense} />
+    </div>
+  )
+}
+
+function DetailGroup({
+  title,
+  tone,
+  items,
+}: {
+  title: string
+  tone: 'income' | 'expense'
+  items: Entry[]
+}) {
+  if (items.length === 0) return null
+  const color = tone === 'income' ? 'text-emerald-600' : 'text-red-600'
+  const sign = tone === 'income' ? '+' : '−'
+  const subtotal = sumAmounts(items.map((e) => e.amount))
+  return (
+    <div>
+      <div className="flex items-center justify-between px-4 py-1.5 text-xs font-semibold text-slate-500">
+        <span>{title}</span>
+        <span className={color}>
+          {sign}
+          {formatMoney(subtotal)}
+        </span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {items.map((e) => (
+          <div key={e.id} className="flex items-center gap-3 px-4 py-2">
+            <span className="text-lg">{iconFor(e)}</span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm text-slate-700">
+                {e.description || '（未填说明）'}
+              </div>
+              <div className="truncate text-[11px] text-slate-400">
+                {(e.category || (tone === 'income' ? '收入' : '支出')) + ' · ' + prettyDate(e.entry_date)}
+                {e.is_unexpected ? ' · 意外' : e.settled ? ' · ✅已实现' : ' · 待实现'}
+              </div>
+            </div>
+            <span className={'shrink-0 text-sm font-semibold ' + color}>
+              {sign}
+              {formatMoney(e.amount)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
