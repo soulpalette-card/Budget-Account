@@ -304,44 +304,44 @@ export function Account() {
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {msg && <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</div>}
 
-      {/* ===== 窗口一：预算（灰色）===== */}
-      <div className="rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 p-4 shadow-sm">
+      {/* ===== 窗口一：预算（深板岩蓝，沉稳“计划”感）===== */}
+      <div className="rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 p-4 shadow-md">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-bold text-slate-600">
+          <span className="text-sm font-semibold text-slate-100">
             📋 预算 Budget（计划）{locked && ' 🔒'}
           </span>
-          <span className="text-xs text-slate-500">预算结余</span>
+          <span className="text-xs text-slate-400">预算结余</span>
         </div>
         <div
           className={
             'text-3xl font-extrabold ' +
-            (calc.plannedClosing < 0 ? 'text-red-600' : 'text-emerald-700')
+            (calc.plannedClosing < 0 ? 'text-rose-400' : 'text-emerald-400')
           }
         >
           {formatMoney(calc.plannedClosing)}
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <div className="rounded-lg bg-white/70 px-3 py-1.5">
-            <div className="text-xs text-slate-500">预算流出 · Cash Out</div>
-            <div className="font-bold text-red-600">-{formatMoney(calc.plannedExpense)}</div>
+          <div className="rounded-lg bg-white/10 px-3 py-1.5">
+            <div className="text-xs text-slate-300">预算流出 · Cash Out</div>
+            <div className="font-bold text-rose-300">-{formatMoney(calc.plannedExpense)}</div>
           </div>
-          <div className="rounded-lg bg-white/70 px-3 py-1.5">
-            <div className="text-xs text-slate-500">预算流入 · Cash In</div>
-            <div className="font-bold text-emerald-600">+{formatMoney(calc.plannedIncome)}</div>
+          <div className="rounded-lg bg-white/10 px-3 py-1.5">
+            <div className="text-xs text-slate-300">预算流入 · Cash In</div>
+            <div className="font-bold text-emerald-300">+{formatMoney(calc.plannedIncome)}</div>
           </div>
         </div>
       </div>
 
-      {/* ===== 窗口二：实际现金流（黄色）===== */}
-      <div className="rounded-2xl bg-gradient-to-br from-amber-300 to-yellow-400 p-4 shadow-sm">
+      {/* ===== 窗口二：实际现金流（暖金，醇厚“到手钱”感）===== */}
+      <div className="rounded-2xl bg-gradient-to-br from-amber-300 to-amber-500 p-4 shadow-md">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-bold text-amber-900">💵 实际现金流 Actual</span>
+          <span className="text-sm font-semibold text-amber-950">💵 实际现金流 Actual</span>
           <span className="text-xs text-amber-900/80">实际结余</span>
         </div>
         <div
           className={
             'text-3xl font-extrabold ' +
-            (calc.actualClosing < 0 ? 'text-red-700' : 'text-emerald-800')
+            (calc.actualClosing < 0 ? 'text-red-800' : 'text-emerald-900')
           }
         >
           {formatMoney(calc.actualClosing)}
