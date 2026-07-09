@@ -245,21 +245,10 @@ export function Account() {
     }
   }
 
-  // 锁定 / 解锁本月预算
-  async function toggleLock() {
-    if (!currentMonth) return
-    try {
-      await store.updateMonth(currentMonth.id, { budget_locked: !currentMonth.budget_locked })
-      load(selectedId)
-    } catch (err) {
-      setError(friendlyError(err))
-    }
-  }
-
   if (loading)
     return <div className="py-16 text-center text-slate-500">{t('加载中…', 'Loading…')}</div>
 
-  const locked = currentMonth?.budget_locked ?? false
+  const locked = false // 锁定功能已移除
 
   // 预算 vs 实际（本月净流，收−支），以及差异从哪来
   const budgetNet = round2(calc.plannedIncome - calc.plannedExpense)
@@ -274,7 +263,7 @@ export function Account() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 pb-24">
-      {/* ===== 顶部工具条：月份 + 锁定 + 列印 ===== */}
+      {/* ===== 顶部工具条：月份 + 列印 ===== */}
       <div className="no-print flex items-center justify-between gap-2">
         <select
           value={selectedId}
@@ -288,20 +277,6 @@ export function Account() {
           ))}
         </select>
         <div className="flex items-center gap-2">
-          <button
-            onClick={toggleLock}
-            className={
-              'rounded-full px-3 py-1 text-xs font-medium ' +
-              (locked ? 'bg-slate-700 text-white' : 'bg-white text-slate-600 border border-slate-300')
-            }
-            title={
-              locked
-                ? t('预算已锁定，点击解锁', 'Budget locked — tap to unlock')
-                : t('点击锁定预算（锁定后新记的自动进临时新款）', 'Lock budget (new entries go to Extra)')
-            }
-          >
-            {locked ? t('🔒 已锁定', '🔒 Locked') : t('🔓 锁定预算', '🔓 Lock budget')}
-          </button>
           <button onClick={() => window.print()} className="text-slate-500">
             🖨
           </button>
@@ -571,24 +546,65 @@ function EntryItem({
   const amtColor = isIncome ? 'text-emerald-600' : 'text-red-600'
   const signed = (isIncome ? '+' : '-') + compactNum(e.amount) // 例：+120,244.58 / -9,150.00
 
+  // 编辑草稿：改动先存这里，点 ✅ 才写回数据库（避免手机上自动保存没触发）
+  const [draft, setDraft] = useState({
+    entry_date: e.entry_date ?? '',
+    amount: e.amount.toFixed(2),
+    description: e.description ?? '',
+    category: e.category ?? '',
+    zone: e.zone as Entry['zone'],
+  })
   // 子项目（拆单）本地编辑状态：金额先用字符串存，方便输入
   const [subs, setSubs] = useState<{ desc: string; amount: string }[]>(
     (e.sub_items ?? []).map((s) => ({ desc: s.desc, amount: s.amount.toFixed(2) })),
   )
   const subTotal = sumAmounts(subs.map((s) => parseAmount(s.amount)))
+  const draftIsIncome = draft.zone === 'income'
 
-  // 存子项目到数据库（有子项目时，主金额自动=合计）
-  function commitSubs(list: { desc: string; amount: string }[]) {
-    const items = list
-      .map((s) => ({ desc: s.desc.trim(), amount: parseAmount(s.amount) }))
-      .filter((s) => s.amount !== 0 || s.desc !== '')
-    onSave(e, { sub_items: items.length ? items : null })
+  // 把草稿还原成当前记录的值（打开/取消时用）
+  function resetDraft() {
+    setDraft({
+      entry_date: e.entry_date ?? '',
+      amount: e.amount.toFixed(2),
+      description: e.description ?? '',
+      category: e.category ?? '',
+      zone: e.zone,
+    })
+    setSubs((e.sub_items ?? []).map((s) => ({ desc: s.desc, amount: s.amount.toFixed(2) })))
   }
-  // 开始拆分：把当前这一笔变成第一个子项目
+  // 打开编辑（先把草稿对齐当前值）
+  function openEditor() {
+    resetDraft()
+    setOpen(true)
+  }
+  // ✅ 确认：把草稿一次性写回
+  function confirmEdit() {
+    const patch: Partial<Entry> = {
+      entry_date: draft.entry_date || null,
+      description: draft.description || null,
+      category: draft.category || null,
+      zone: draft.zone,
+    }
+    if (subs.length > 0) {
+      patch.sub_items = subs
+        .map((s) => ({ desc: s.desc.trim(), amount: parseAmount(s.amount) }))
+        .filter((s) => s.amount !== 0 || s.desc !== '')
+    } else {
+      patch.amount = parseAmount(draft.amount)
+      patch.sub_items = null
+    }
+    onSave(e, patch)
+    setOpen(false)
+  }
+  // ❎ 取消：丢弃改动
+  function cancelEdit() {
+    resetDraft()
+    setOpen(false)
+  }
+
+  // 拆分（只改本地草稿，等 ✅ 才存）
   function startSplit() {
-    const seeded = [{ desc: e.description || '明细1', amount: e.amount.toFixed(2) }]
-    setSubs(seeded)
-    commitSubs(seeded)
+    setSubs([{ desc: draft.description || '', amount: draft.amount }])
   }
   function addSub() {
     setSubs([...subs, { desc: '', amount: '' }])
@@ -597,13 +613,10 @@ function EntryItem({
     setSubs(subs.map((s, idx) => (idx === i ? { ...s, ...patch } : s)))
   }
   function removeSub(i: number) {
-    const next = subs.filter((_, idx) => idx !== i)
-    setSubs(next)
-    commitSubs(next)
+    setSubs(subs.filter((_, idx) => idx !== i))
   }
   function cancelSplit() {
     setSubs([])
-    onSave(e, { sub_items: null }) // 合并回一笔，金额保持当前合计
   }
 
   return (
@@ -611,7 +624,10 @@ function EntryItem({
       {/* 收起态：项目 ｜ 预算 ｜ 实际（同一行左右对照）*/}
       <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 px-3 py-2">
         {/* 项目（点＝展开编辑）*/}
-        <button onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-2 text-left">
+        <button
+          onClick={() => (open ? cancelEdit() : openEditor())}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
           <span className="text-base">{iconFor(e)}</span>
           <span className="min-w-0">
             <span className="block truncate text-sm text-slate-700">
@@ -686,33 +702,24 @@ function EntryItem({
         <div className="space-y-2 bg-slate-50 px-4 py-3">
           {subs.length === 0 ? (
             <>
-              {/* 普通模式：日期 + 金额 */}
+              {/* 普通模式：日期 + 金额（改动只进草稿，点 ✅ 才存）*/}
               <div className="grid grid-cols-2 gap-2">
                 <input
                   type="date"
-                  defaultValue={e.entry_date ?? ''}
-                  onBlur={(ev) => {
-                    const v = ev.target.value || null
-                    if (v !== e.entry_date) onSave(e, { entry_date: v })
-                  }}
+                  value={draft.entry_date}
+                  onChange={(ev) => setDraft({ ...draft, entry_date: ev.target.value })}
                   className={inputCls}
                 />
                 <input
                   type="text"
                   inputMode="decimal"
-                  defaultValue={e.amount.toFixed(2)}
-                  onBlur={(ev) => {
-                    const v = parseAmount(ev.target.value)
-                    ev.target.value = v.toFixed(2)
-                    if (v !== e.amount) onSave(e, { amount: v })
-                  }}
+                  value={draft.amount}
+                  onChange={(ev) => setDraft({ ...draft, amount: ev.target.value })}
+                  placeholder={t('金额', 'Amount')}
                   className={inputCls + ' text-right'}
                 />
               </div>
-              <button
-                onClick={startSplit}
-                className="text-xs text-amber-600 hover:text-amber-800"
-              >
+              <button onClick={startSplit} className="text-xs text-amber-600 hover:text-amber-800">
                 {t('＋ 拆分成明细（一笔里有多张单据）', '＋ Split into items (multiple receipts)')}
               </button>
             </>
@@ -721,11 +728,8 @@ function EntryItem({
               {/* 拆分模式：日期 + 子项目列表（自动加总）*/}
               <input
                 type="date"
-                defaultValue={e.entry_date ?? ''}
-                onBlur={(ev) => {
-                  const v = ev.target.value || null
-                  if (v !== e.entry_date) onSave(e, { entry_date: v })
-                }}
+                value={draft.entry_date}
+                onChange={(ev) => setDraft({ ...draft, entry_date: ev.target.value })}
                 className={inputCls}
               />
               <div className="rounded-md border border-slate-200 bg-white p-2">
@@ -741,8 +745,7 @@ function EntryItem({
                       type="text"
                       value={s.desc}
                       onChange={(ev) => updateSub(i, { desc: ev.target.value })}
-                      onBlur={() => commitSubs(subs)}
-                      placeholder="小项目 如 复印机 / 电话费"
+                      placeholder={t('小项目 如 复印机 / 电话费', 'Item e.g. Copier / Phone')}
                       className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
                     />
                     <input
@@ -750,7 +753,6 @@ function EntryItem({
                       inputMode="decimal"
                       value={s.amount}
                       onChange={(ev) => updateSub(i, { amount: ev.target.value })}
-                      onBlur={() => commitSubs(subs)}
                       placeholder={t('金额', 'Amount')}
                       className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
                     />
@@ -775,18 +777,15 @@ function EntryItem({
           )}
           <input
             type="text"
-            defaultValue={e.description ?? ''}
+            value={draft.description}
             placeholder={t('说明…', 'Description…')}
-            onBlur={(ev) => {
-              const v = ev.target.value || null
-              if (v !== e.description) onSave(e, { description: v })
-            }}
+            onChange={(ev) => setDraft({ ...draft, description: ev.target.value })}
             className={inputCls}
           />
           <div className="flex items-center gap-2">
             <select
-              defaultValue={e.category ?? ''}
-              onChange={(ev) => onSave(e, { category: ev.target.value || null })}
+              value={draft.category}
+              onChange={(ev) => setDraft({ ...draft, category: ev.target.value })}
               className={inputCls + ' flex-1'}
             >
               <option value="">{t('（未分类）', '(No category)')}</option>
@@ -797,10 +796,28 @@ function EntryItem({
               ))}
             </select>
             <button
-              onClick={() => onSave(e, { zone: isIncome ? 'expense' : 'income' })}
+              onClick={() =>
+                setDraft({ ...draft, zone: draftIsIncome ? 'expense' : 'income' })
+              }
               className="shrink-0 rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
             >
-              {isIncome ? t('改为支出', 'To Expense') : t('改为收入', 'To Income')}
+              {draftIsIncome ? t('改为支出', 'To Expense') : t('改为收入', 'To Income')}
+            </button>
+          </div>
+
+          {/* ✅ 确认 / ❎ 取消 —— 填好点 ✅ 才保存 */}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={confirmEdit}
+              className="flex-1 rounded-lg bg-emerald-500 py-2 text-sm font-bold text-white hover:bg-emerald-600"
+            >
+              ✅ {t('确认', 'Confirm')}
+            </button>
+            <button
+              onClick={cancelEdit}
+              className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-bold text-slate-600 hover:bg-slate-300"
+            >
+              ❎ {t('取消', 'Cancel')}
             </button>
           </div>
           <div className="flex items-center justify-end gap-4 text-xs">
