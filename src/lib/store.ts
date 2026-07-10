@@ -20,6 +20,7 @@ import type {
   LogItem,
   Month,
   RecurringTemplate,
+  SubconClaim,
   SubItem,
   TemplateKind,
   Zone,
@@ -384,4 +385,61 @@ export async function addNextMonth(newLabel: string): Promise<Month> {
   }
 
   return newMonth
+}
+
+// ============================================================================
+// 六、进度证书 / Cert（subcon_claims）—— QS 记录每个分包商的每期 claim
+// ============================================================================
+
+// 拿全部 cert 记录，按 subcon、再按第几期排好
+export async function getCertificates(): Promise<SubconClaim[]> {
+  const { data, error } = await supabase
+    .from('subcon_claims')
+    .select('*')
+    .order('subcon', { ascending: true })
+    .order('claim_no', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as SubconClaim[]
+}
+
+// 保存一期 cert：有 id 更新，没 id 新增
+export async function saveCertificate(input: {
+  id?: string
+  subcon: string
+  claim_no: number
+  claim_month?: string | null
+  gross_amount?: number
+  retention_pct?: number
+  note?: string | null
+}): Promise<SubconClaim> {
+  const userId = await getUserId()
+  const row = {
+    user_id: userId,
+    subcon: input.subcon,
+    claim_no: input.claim_no,
+    claim_month: input.claim_month ?? null,
+    gross_amount: round2(input.gross_amount ?? 0), // 金额固定两位小数
+    retention_pct: round2(input.retention_pct ?? 0),
+    note: input.note ?? null,
+  }
+  if (input.id) {
+    const { data, error } = await supabase
+      .from('subcon_claims')
+      .update(row)
+      .eq('id', input.id)
+      .select()
+      .single()
+    if (error) throw error
+    return data as SubconClaim
+  } else {
+    const { data, error } = await supabase.from('subcon_claims').insert(row).select().single()
+    if (error) throw error
+    return data as SubconClaim
+  }
+}
+
+// 删除一期 cert（这是 QS 记录，直接删；界面里删前会二次确认）
+export async function deleteCertificate(id: string): Promise<void> {
+  const { error } = await supabase.from('subcon_claims').delete().eq('id', id)
+  if (error) throw error
 }

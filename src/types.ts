@@ -68,6 +68,20 @@ export interface LogItem {
   amount: number // 当天花了多少
 }
 
+// subcon_claims 表：QS 给分包商(subcon)出的每期进度款证书(cert/claim)
+//   一行 = 一个 subcon 的一期 claim。累计、本期应付净额由程序自动算。
+export interface SubconClaim {
+  id: string // 唯一编号
+  user_id: string // 谁建的（共享，不限可见范围）
+  subcon: string // 分包商名称（分组依据）
+  claim_no: number // 第几期
+  claim_month: string | null // 月份，例如 "2026-07"
+  gross_amount: number // 本期金额（未扣保留金）
+  retention_pct: number // 保留金百分比（如 10 = 10%）
+  note: string | null // 备注
+  created_at: string // 创建时间
+}
+
 // recurring_templates 表：每月自动重复的项目（房租、薪资这种）
 export interface RecurringTemplate {
   id: string // 唯一编号

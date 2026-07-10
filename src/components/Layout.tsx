@@ -41,6 +41,9 @@ export function Layout() {
               <NavLink to="/overview" className={linkClass}>
                 {t('6个月总览', '6-Month')}
               </NavLink>
+              <NavLink to="/certificate" className={linkClass}>
+                {t('证书', 'Cert')}
+              </NavLink>
               <NavLink to="/settings" className={linkClass}>
                 {t('设置', 'Settings')}
               </NavLink>
