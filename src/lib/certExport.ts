@@ -222,7 +222,77 @@ export function buildCertPdfDoc(data: CertExport): jsPDF {
     drawAppendix(doc, data)
   }
 
+  // —— 付款清单 payment list（若有就另起一页）——
+  const pmt = c.paymentList ?? []
+  if (pmt.length > 0) {
+    doc.addPage()
+    drawPaymentList(doc, data)
+  }
+
   return doc
+}
+
+// 付款清单页：NO | DATE | CERT | AMOUNT | DESCRIPTION + TOTAL
+function drawPaymentList(doc: jsPDF, data: CertExport) {
+  const { cert: c, claimNoPad } = data
+  const L = 14
+  const R = 196
+  let y = 20
+  // 顶部项目全名
+  if (c.paymentHeader) {
+    doc.setFont('helvetica', 'bold').setFontSize(10)
+    const head = doc.splitTextToSize(c.paymentHeader, R - L)
+    doc.text(head, L, y)
+    y += head.length * 5 + 4
+  }
+  doc.setFont('helvetica', 'bold').setFontSize(11)
+  doc.text('PAYMENT LIST', L, y)
+  doc.setLineWidth(0.3).line(L, y + 1, L + 26, y + 1)
+  doc.setFont('helvetica', 'normal').setFontSize(10)
+  doc.text(`Claim : ${claimNoPad}`, 150, y - 2)
+  doc.text(`Period ending : ${c.periodEnding ?? ''}`, 150, y + 3)
+  y += 8
+
+  // 列 x 边界
+  const xs = [L, L + 14, L + 50, L + 86, L + 128, R]
+  const header = ['NO', 'DATE', 'CERT', 'AMOUNT', 'DESCRIPTION']
+  const rowH = 6
+  const drawRowLines = (top: number) => {
+    for (const x of xs) doc.line(x, top, x, top + rowH)
+    doc.line(L, top, R, top)
+    doc.line(L, top + rowH, R, top + rowH)
+  }
+  // 表头
+  doc.setFont('helvetica', 'bold').setFontSize(9)
+  drawRowLines(y)
+  header.forEach((h, i) => {
+    const cx = (xs[i] + xs[i + 1]) / 2
+    doc.text(h, cx, y + 4, { align: 'center' })
+  })
+  y += rowH
+
+  // 行
+  doc.setFont('helvetica', 'normal')
+  const rows = c.paymentList ?? []
+  const shown = Math.max(rows.length, 6) // 照原稿至少留 6 行空格
+  for (let i = 0; i < shown; i++) {
+    const r = rows[i]
+    drawRowLines(y)
+    doc.text(String(i + 1), (xs[0] + xs[1]) / 2, y + 4, { align: 'center' })
+    if (r) {
+      doc.text(r.date || '', (xs[1] + xs[2]) / 2, y + 4, { align: 'center' })
+      doc.text(r.cert || '', (xs[2] + xs[3]) / 2, y + 4, { align: 'center' })
+      doc.text(r.amount ? fmt(r.amount) : '', xs[3] + 32, y + 4, { align: 'right' })
+      doc.text(r.desc || '', xs[4] + 2, y + 4)
+    }
+    y += rowH
+  }
+  // 合计
+  const total = round2(rows.reduce((s, r) => s + (r.amount || 0), 0))
+  drawRowLines(y)
+  doc.setFont('helvetica', 'bold')
+  doc.text('TOTAL', L + 2, y + 4)
+  doc.text(fmt(total), xs[3] + 32, y + 4, { align: 'right' })
 }
 
 // 公司抬头（封面 + 附录都用）
@@ -661,5 +731,42 @@ export function buildCertWorkbook(data: CertExport): XLSX.WorkBook {
   ax['!cols'] = [{ wch: 5 }, { wch: 30 }, { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 14 }]
   ax['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: ar + 1, c: AL } })
   XLSX.utils.book_append_sheet(wb, ax, 'Appendix')
+
+  // ===================== 付款清单表（若有）=====================
+  const pmt = c.paymentList ?? []
+  if (pmt.length > 0) {
+    const pw: XLSX.WorkSheet = {}
+    const PL = 4 // 5 列 A..E
+    let pr = 0
+    if (c.paymentHeader) {
+      put(pw, pr, 0, c.paymentHeader, { font: { bold: true } })
+      mergeCells(pw, pr, 0, pr, PL)
+      pr += 2
+    }
+    put(pw, pr, 0, 'PAYMENT LIST', { font: { bold: true, sz: 12 } })
+    put(pw, pr, 3, `Claim : ${claimNoPad}`, { alignment: { horizontal: 'right' } })
+    pr++
+    put(pw, pr, 3, `Period ending : ${c.periodEnding ?? ''}`, { alignment: { horizontal: 'right' } })
+    pr++
+    const ph = { font: { bold: true }, border: box, alignment: { horizontal: 'center' } }
+    ;['NO', 'DATE', 'CERT', 'AMOUNT', 'DESCRIPTION'].forEach((h, i) => put(pw, pr, i, h, ph))
+    pr++
+    pmt.forEach((row, i) => {
+      put(pw, pr, 0, i + 1, { border: box, alignment: { horizontal: 'center' } })
+      put(pw, pr, 1, row.date || '', { border: box, alignment: { horizontal: 'center' } })
+      put(pw, pr, 2, row.cert || '', { border: box, alignment: { horizontal: 'center' } })
+      put(pw, pr, 3, n2(row.amount || 0), { border: box, numFmt: MONEY_FMT, alignment: { horizontal: 'right' } })
+      put(pw, pr, 4, row.desc || '', { border: box })
+      pr++
+    })
+    const ptotal = round2(pmt.reduce((s, r) => s + (r.amount || 0), 0))
+    put(pw, pr, 0, 'TOTAL', { font: { bold: true }, border: box })
+    mergeCells(pw, pr, 0, pr, 2)
+    put(pw, pr, 3, ptotal, { font: { bold: true }, border: box, numFmt: MONEY_FMT, alignment: { horizontal: 'right' } })
+    put(pw, pr, 4, '', { border: box })
+    pw['!cols'] = [{ wch: 5 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 30 }]
+    pw['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: pr + 1, c: PL } })
+    XLSX.utils.book_append_sheet(wb, pw, 'PaymentList')
+  }
   return wb
 }

@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as store from '../lib/store'
-import type { AppendixRow, CertData, Subcon, SubconClaim } from '../types'
+import type { AppendixRow, CertData, PaymentRow, Subcon, SubconClaim } from '../types'
 import { certScopes, company } from '../config'
 import { exportCertExcel, exportCertPdf } from '../lib/certExport'
 import { parseAmount, round2 } from '../lib/money'
@@ -417,6 +417,24 @@ function CertDoc({
   const catSub = (category: string) =>
     round2(appx.filter((r) => r.category === category).reduce((s, r) => s + rowAmt(r), 0))
 
+  // 付款清单草稿（金额用字符串）
+  type PmtDraft = { date: string; cert: string; amount: string; desc: string }
+  const [pmtHeader, setPmtHeader] = useState<string>(c?.paymentHeader ?? '')
+  const [pmt, setPmt] = useState<PmtDraft[]>(
+    (c?.paymentList ?? []).map((p) => ({
+      date: p.date,
+      cert: p.cert,
+      amount: p.amount ? fmtInput(p.amount) : '',
+      desc: p.desc,
+    })),
+  )
+  const setPmtRow = (i: number, key: keyof PmtDraft, v: string) =>
+    setPmt((p) => p.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)))
+  const addPmtRow = () => setPmt((p) => [...p, { date: '', cert: 'ADVANCE', amount: '', desc: '' }])
+  const removePmtRow = (i: number) => setPmt((p) => p.filter((_, idx) => idx !== i))
+  const pmtTotal = round2(pmt.reduce((s, r) => s + parseAmount(r.amount), 0))
+  const hasPmt = pmt.some((r) => r.date.trim() !== '' || parseAmount(r.amount) !== 0 || r.desc.trim() !== '')
+
   const calc = compute({
     workdone: num('workdone'),
     vo: num('vo'),
@@ -443,6 +461,14 @@ function CertDoc({
         rate: parseAmount(r.rate),
       }))
       .filter((r) => r.desc !== '' || r.qty !== 0 || r.rate !== 0)
+    const paymentList: PaymentRow[] = pmt
+      .map((r) => ({
+        date: r.date.trim(),
+        cert: r.cert.trim(),
+        amount: parseAmount(r.amount),
+        desc: r.desc.trim(),
+      }))
+      .filter((r) => r.date !== '' || r.amount !== 0 || r.desc !== '')
     return {
       claimPeriod: f.claimPeriod || undefined,
       refLA: f.refLA || undefined,
@@ -468,6 +494,8 @@ function CertDoc({
       dedKsk: num('dedKsk'),
       dedBackcharge: num('dedBackcharge'),
       appendix: appendix.length > 0 ? appendix : undefined,
+      paymentHeader: pmtHeader || undefined,
+      paymentList: paymentList.length > 0 ? paymentList : undefined,
       preparedBy: f.preparedBy || undefined,
       verifiedBy: f.verifiedBy || undefined,
       checkedBy: f.checkedBy || undefined,
@@ -937,6 +965,103 @@ function CertDoc({
             </div>
           )}
         </div>
+      </div>
+
+      {/* ===== 付款清单 Payment List：支撑封面「已付款」（多用于第一期借支，列印时另起一页）===== */}
+      <div
+        className={
+          'cert-doc mx-auto my-4 max-w-[820px] bg-white p-8 text-[12px] leading-tight text-black shadow-lg print:my-0 print:max-w-none print:p-0 print:shadow-none print:break-before-page ' +
+          (hasPmt ? '' : 'print:hidden')
+        }
+      >
+        {/* 顶部项目全名 */}
+        <input
+          value={pmtHeader}
+          onChange={(e) => setPmtHeader(e.target.value)}
+          placeholder={t('项目全名（可空）', 'Project full name (optional)')}
+          className="w-full bg-transparent text-[12px] font-bold focus:bg-amber-50 focus:outline-none"
+        />
+
+        <div className="mt-4 flex items-start justify-between">
+          <div className="text-[13px] font-bold underline">PAYMENT LIST</div>
+          <div className="text-right text-[12px]">
+            <div>Claim : {claimNoPad}</div>
+            <div>Period ending : {f.periodEnding}</div>
+          </div>
+        </div>
+
+        {/* 表格 */}
+        <table className="mt-1 w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="text-center font-bold">
+              <th className="w-12 border border-black py-1">NO</th>
+              <th className="w-28 border border-black py-1">DATE</th>
+              <th className="w-28 border border-black py-1">CERT</th>
+              <th className="w-32 border border-black py-1">AMOUNT</th>
+              <th className="border border-black py-1">DESCRIPTION</th>
+              <th className="no-print w-6 border-0" />
+            </tr>
+          </thead>
+          <tbody>
+            {pmt.map((r, i) => (
+              <tr key={i}>
+                <td className="border border-black text-center">{i + 1}</td>
+                <td className="border border-black px-1 text-center">
+                  <input
+                    value={r.date}
+                    onChange={(e) => setPmtRow(i, 'date', e.target.value)}
+                    placeholder={t('日期', 'Date')}
+                    className="w-full bg-transparent text-center focus:bg-amber-50 focus:outline-none"
+                  />
+                </td>
+                <td className="border border-black px-1 text-center">
+                  <input
+                    value={r.cert}
+                    onChange={(e) => setPmtRow(i, 'cert', e.target.value)}
+                    placeholder="ADVANCE"
+                    className="w-full bg-transparent text-center focus:bg-amber-50 focus:outline-none"
+                  />
+                </td>
+                <td className="border border-black px-1 text-right">
+                  <input
+                    value={r.amount}
+                    inputMode="decimal"
+                    onChange={(e) => setPmtRow(i, 'amount', e.target.value)}
+                    onBlur={() => setPmtRow(i, 'amount', fmtInput(parseAmount(r.amount)))}
+                    placeholder="0"
+                    className="w-full bg-transparent text-right focus:bg-amber-50 focus:outline-none"
+                  />
+                </td>
+                <td className="border border-black px-1">
+                  <input
+                    value={r.desc}
+                    onChange={(e) => setPmtRow(i, 'desc', e.target.value)}
+                    className="w-full bg-transparent focus:bg-amber-50 focus:outline-none"
+                  />
+                </td>
+                <td className="no-print border-0 text-center">
+                  <button onClick={() => removePmtRow(i)} className="text-slate-300 hover:text-red-500" title={t('删除', 'Remove')}>
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr className="font-bold">
+              <td className="border border-black px-1" colSpan={3}>
+                TOTAL
+              </td>
+              <td className="border border-black px-1 text-right">{fmtAmt(pmtTotal)}</td>
+              <td className="border border-black" />
+              <td className="no-print border-0" />
+            </tr>
+          </tbody>
+        </table>
+        <button
+          onClick={addPmtRow}
+          className="no-print mt-1 text-[11px] font-medium text-amber-600 hover:underline"
+        >
+          {t('＋ 加一笔付款', '＋ Add payment')}
+        </button>
       </div>
     </div>
   )

@@ -79,6 +79,15 @@ export interface AppendixRow {
   rate: number // 单价（RM）
 }
 
+// 付款清单(Payment List)里的一行：记录之前已经给出去的每一笔款
+//   多用在第一期「借支」：把之前分几次给的预支款列出来，合计=封面「已付款」扣项。
+export interface PaymentRow {
+  date: string // 付款日期，例如 20.05.2026
+  cert: string // CERT 列：款项类型，例如 ADVANCE
+  amount: number // 金额
+  desc: string // 说明（可空）
+}
+
 // 一张「进度付款证书」的全部内容（存进 subcon_claims.cert 这个 jsonb 里）
 //   金额都是数字；文字都是字符串。计算(小计/保留金/净额/应付)由程序自动算。
 export interface CertData {
@@ -110,6 +119,9 @@ export interface CertData {
   dedBackcharge?: number // 6 DEDUCTION - Backcharge
   // —— 附录明细（支撑封面工程量/变更单）——
   appendix?: AppendixRow[] // 逐项测量明细；为空就不出附录页
+  // —— 付款清单（支撑封面「已付款」扣项，多用于第一期借支）——
+  paymentHeader?: string // 付款清单页顶部的项目全名（如政府工程名称）
+  paymentList?: PaymentRow[] // 之前已付的每一笔；为空就不出付款清单页
   // —— 签名栏名字 ——
   preparedBy?: string
   verifiedBy?: string
