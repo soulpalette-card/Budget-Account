@@ -102,7 +102,8 @@ export interface CertData {
   subContractor?: string // 分包商名字（也是分组依据）
   trade?: string // 工种，如 BARBENDER & CARPENTER
   contractSum?: string // 合同额（可填 Nil，所以用文字）
-  retentionPct?: number // Limit of Retention %
+  retentionPct?: number // Limit of Retention %（显示的百分比标签）
+  retentionAmount?: number // 手填的保留金金额（有值就覆盖“百分比×小计”的自动计算）
   claimNo?: number // 第几期
   periodEnding?: string // 结算期，如 June 26
   valuationDate?: string // 估价日

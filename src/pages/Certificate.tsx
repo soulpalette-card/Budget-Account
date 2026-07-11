@@ -56,12 +56,12 @@ function certFromSubcon(sub: Subcon, claimNo: number, dedPrevious: number): Cert
   }
 }
 
-// 计算表（照 PDF 的加减逻辑）
+// 计算表（照 PDF 的加减逻辑）。retention = 保留金金额（由调用方决定：自动算或手填覆盖）
 function compute(d: {
   workdone: number
   vo: number
   advance3: number
-  retentionPct: number
+  retention: number
   addAdvance: number
   addKsk: number
   addOthers: number
@@ -70,7 +70,7 @@ function compute(d: {
   dedBackcharge: number
 }) {
   const subtotalA = round2(d.workdone + d.vo + d.advance3)
-  const retention = round2((subtotalA * d.retentionPct) / 100)
+  const retention = round2(d.retention)
   const subtotalB = round2(d.addAdvance + d.addKsk + d.addOthers)
   const nett = round2(subtotalA - retention + subtotalB)
   const dedTotal = round2(d.dedPrevious + d.dedKsk + d.dedBackcharge)
@@ -87,7 +87,8 @@ function summarizeSubcon(list: SubconClaim[]) {
   const wd = lc?.workdone ?? 0 // 当前累计工程量 = 最新一期封面第 1 项
   const vo = lc?.vo ?? 0
   const adv = lc?.advance3 ?? 0
-  const retentionHeld = round2(((wd + vo + adv) * (lc?.retentionPct ?? 0)) / 100) // 目前扣着的保留金
+  // 目前扣着的保留金：有手填就用手填，否则自动按百分比算
+  const retentionHeld = lc?.retentionAmount != null ? round2(lc.retentionAmount) : round2(((wd + vo + adv) * (lc?.retentionPct ?? 0)) / 100)
   const paidToDate = round2(sorted.reduce((s, c) => s + (c.gross_amount || 0), 0)) // 累计已付（各期应付之和）
   const thisPeriod = round2(wd - (prev?.cert?.workdone ?? 0)) // 本期新增工程量 = 最新 − 上一期
   return { workdoneToDate: wd, voToDate: vo, retentionHeld, paidToDate, thisPeriod, latestNo: latest?.claim_no ?? 0 }
@@ -339,6 +340,8 @@ function CertDoc({
     trade: c?.trade ?? '',
     contractSum: c?.contractSum ?? '',
     retentionPct: String(c?.retentionPct ?? claim?.retention_pct ?? 5),
+    // 保留金覆盖：有值就手动指定保留金金额，空=自动按百分比算
+    retentionAmt: c?.retentionAmount != null ? fmtInput(c.retentionAmount) : '',
     claimNo: String(c?.claimNo ?? claim?.claim_no ?? 1),
     periodEnding: c?.periodEnding ?? '',
     valuationDate: c?.valuationDate ?? '',
@@ -435,11 +438,16 @@ function CertDoc({
   const pmtTotal = round2(pmt.reduce((s, r) => s + parseAmount(r.amount), 0))
   const hasPmt = pmt.some((r) => r.date.trim() !== '' || parseAmount(r.amount) !== 0 || r.desc.trim() !== '')
 
+  // 保留金：自动 = 小计A × 百分比；若「保留金覆盖」栏(retentionAmt)有填，就用填的
+  //   （用于像「预支部分不计保留金」这种，QS 手算的保留金）
+  const subtotalA0 = round2(num('workdone') + num('vo') + num('advance3'))
+  const autoRetention = round2((subtotalA0 * parseAmount(f.retentionPct)) / 100)
+  const retentionUsed = f.retentionAmt.trim() !== '' ? parseAmount(f.retentionAmt) : autoRetention
   const calc = compute({
     workdone: num('workdone'),
     vo: num('vo'),
     advance3: num('advance3'),
-    retentionPct: parseAmount(f.retentionPct),
+    retention: retentionUsed,
     addAdvance: num('addAdvance'),
     addKsk: num('addKsk'),
     addOthers: num('addOthers'),
@@ -480,6 +488,7 @@ function CertDoc({
       trade: f.trade || undefined,
       contractSum: f.contractSum || undefined,
       retentionPct: parseAmount(f.retentionPct),
+      retentionAmount: f.retentionAmt.trim() !== '' ? parseAmount(f.retentionAmt) : undefined,
       claimNo: Math.max(1, Math.round(parseAmount(f.claimNo)) || 1),
       periodEnding: f.periodEnding || undefined,
       valuationDate: f.valuationDate || undefined,
@@ -720,7 +729,19 @@ function CertDoc({
             <span className="w-6" />
             <span className="flex-1 font-bold">Retention Sum {parseAmount(f.retentionPct)}%</span>
             <span className="mr-2 font-bold">RM</span>
-            <span className={numColW + ' text-right font-bold'}>{fmtAmt(-calc.retention)}</span>
+            {/* 保留金：默认自动按百分比算；想手填（如预支不计保留金）直接改这格即可 */}
+            <span className={numColW + ' text-right font-bold'}>
+              <input
+                value={f.retentionAmt !== '' ? f.retentionAmt : autoRetention === 0 ? '' : fmtInput(autoRetention)}
+                inputMode="decimal"
+                placeholder="-"
+                onChange={(e) => set('retentionAmt', e.target.value)}
+                onBlur={() => {
+                  if (f.retentionAmt.trim() !== '') set('retentionAmt', fmtInput(parseAmount(f.retentionAmt)))
+                }}
+                className="w-full bg-transparent text-right placeholder:text-black focus:bg-amber-50 focus:outline-none"
+              />
+            </span>
           </div>
 
           <CalcRow no="5" desc="ADDITION" />
