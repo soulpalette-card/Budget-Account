@@ -22,57 +22,57 @@ export function Layout() {
 
   // 导航链接的样式：选中的高亮，没选中的灰色
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    'px-3 py-2 rounded-md text-sm font-medium ' +
+    'shrink-0 whitespace-nowrap px-3 py-2 rounded-md text-sm font-medium ' +
     (isActive ? 'bg-amber-500 text-white' : 'text-slate-600 hover:bg-slate-200')
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-hidden">
       {/* 顶部导航栏（列印时隐藏）*/}
       <header className="no-print border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-4">
-            <span className="text-lg font-bold text-slate-800">
+        <div className="mx-auto max-w-7xl px-4 py-2">
+          {/* 第一行：标题（左）＋ 中英/登出（右）*/}
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-base font-bold text-slate-800">
               {t('UNIKOYO 现金流预算', 'UNIKOYO Cash Flow')}
             </span>
-            <nav className="flex gap-1">
-              <NavLink to="/" end className={linkClass}>
-                {t('账户', 'Account')}
-              </NavLink>
-              <NavLink to="/overview" className={linkClass}>
-                {t('6个月总览', '6-Month')}
-              </NavLink>
-              <NavLink to="/project" className={linkClass}>
-                {t('项目账', 'Projects')}
-              </NavLink>
-              <NavLink to="/subcons" className={linkClass}>
-                {t('分包商', 'Subcon')}
-              </NavLink>
-              <NavLink to="/certificate" className={linkClass}>
-                {t('证书', 'Cert')}
-              </NavLink>
-              <NavLink to="/settings" className={linkClass}>
-                {t('设置', 'Settings')}
-              </NavLink>
-            </nav>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={toggle}
+                className="rounded-md border border-slate-300 px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                title={t('切换到英文', 'Switch to Chinese')}
+              >
+                {lang === 'zh' ? 'EN' : '中'}
+              </button>
+              <span className="hidden text-sm text-slate-500 sm:inline">{user?.email}</span>
+              <button
+                onClick={handleSignOut}
+                className="rounded-md border border-slate-300 px-2.5 py-1 text-sm text-slate-600 hover:bg-slate-100"
+              >
+                {t('登出', 'Sign out')}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            {/* 中英文切换 */}
-            <button
-              onClick={toggle}
-              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              title={t('切换到英文', 'Switch to Chinese')}
-            >
-              {lang === 'zh' ? 'EN' : '中'}
-            </button>
-            {/* 显示当前登录的邮箱 */}
-            <span className="hidden text-sm text-slate-500 sm:inline">{user?.email}</span>
-            <button
-              onClick={handleSignOut}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              {t('登出', 'Sign out')}
-            </button>
-          </div>
+          {/* 第二行：导航（放不下就横向滑动，不会撑宽整页）*/}
+          <nav className="mt-1.5 flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none]">
+            <NavLink to="/" end className={linkClass}>
+              {t('账户', 'Account')}
+            </NavLink>
+            <NavLink to="/overview" className={linkClass}>
+              {t('6个月总览', '6-Month')}
+            </NavLink>
+            <NavLink to="/project" className={linkClass}>
+              {t('项目账', 'Projects')}
+            </NavLink>
+            <NavLink to="/subcons" className={linkClass}>
+              {t('分包商', 'Subcon')}
+            </NavLink>
+            <NavLink to="/certificate" className={linkClass}>
+              {t('证书', 'Cert')}
+            </NavLink>
+            <NavLink to="/settings" className={linkClass}>
+              {t('设置', 'Settings')}
+            </NavLink>
+          </nav>
         </div>
       </header>
 
