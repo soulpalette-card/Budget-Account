@@ -68,16 +68,53 @@ export interface LogItem {
   amount: number // 当天花了多少
 }
 
+// 一张「进度付款证书」的全部内容（存进 subcon_claims.cert 这个 jsonb 里）
+//   金额都是数字；文字都是字符串。计算(小计/保留金/净额/应付)由程序自动算。
+export interface CertData {
+  claimPeriod?: string // 顶部日期范围，如 "01st-Feb-24 to 29th-Feb-24"
+  // —— 项目信息 ——
+  refLA?: string
+  subconRef?: string
+  dateCommencement?: string // 开工日
+  dateCompletion?: string // 完工日
+  projectTitle?: string // 项目名，如 SEPUTEH
+  // —— 分包商 / claim 信息 ——
+  subContractor?: string // 分包商名字（也是分组依据）
+  trade?: string // 工种，如 BARBENDER & CARPENTER
+  contractSum?: string // 合同额（可填 Nil，所以用文字）
+  retentionPct?: number // Limit of Retention %
+  claimNo?: number // 第几期
+  periodEnding?: string // 结算期，如 June 26
+  valuationDate?: string // 估价日
+  termOfPayment?: string // 付款期，如 45 days
+  // —— 金额（计算表）——
+  workdone?: number // 1 VALUE OF WORKDONE
+  vo?: number // 2 ADDITION (Variation Order)
+  advance3?: number // 3 Advance
+  addAdvance?: number // 5 ADDITION - Advance
+  addKsk?: number // 5 ADDITION - KSK
+  addOthers?: number // 5 ADDITION - Others
+  dedPrevious?: number // 6 DEDUCTION - Previous Amount Payment
+  dedKsk?: number // 6 DEDUCTION - KSK
+  dedBackcharge?: number // 6 DEDUCTION - Backcharge
+  // —— 签名栏名字 ——
+  preparedBy?: string
+  verifiedBy?: string
+  checkedBy?: string // 附 (Project Manager)
+  approvedBy?: string // 附 (Director)
+}
+
 // subcon_claims 表：QS 给分包商(subcon)出的每期进度款证书(cert/claim)
-//   一行 = 一个 subcon 的一期 claim。累计、本期应付净额由程序自动算。
+//   一行 = 一张证书。subcon/claim_no 用来分组排序；完整内容在 cert(jsonb)。
 export interface SubconClaim {
   id: string // 唯一编号
   user_id: string // 谁建的（共享，不限可见范围）
-  subcon: string // 分包商名称（分组依据）
-  claim_no: number // 第几期
-  claim_month: string | null // 月份，例如 "2026-07"
-  gross_amount: number // 本期金额（未扣保留金）
-  retention_pct: number // 保留金百分比（如 10 = 10%）
+  subcon: string // 分包商名称（分组依据，= cert.subContractor）
+  claim_no: number // 第几期（= cert.claimNo）
+  claim_month: string | null // 结算期（= cert.periodEnding），列表显示用
+  gross_amount: number // 本期应付总额（自动算出，列表显示用）
+  retention_pct: number // 保留金百分比
+  cert: CertData | null // 证书完整内容（jsonb）
   note: string | null // 备注
   created_at: string // 创建时间
 }

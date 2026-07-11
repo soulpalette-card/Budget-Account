@@ -1,27 +1,57 @@
 // ============================================================================
 // 文件摘要（Certificate.tsx）—— 进度证书 / Cert 页
 // ----------------------------------------------------------------------------
-// 给 QS 用：记录每个分包商(subcon)每期的进度款证书(claim)。
-// 每期记：第几期、月份、本期金额(未扣保留金)、保留金%。程序自动算：
-//   · 本期保留金 = 本期金额 × 保留金%
-//   · 本期应付净额 = 本期金额 − 本期保留金
-//   · 累计 = 该 subcon 按期次逐期累加的“本期金额”
-// 每个 subcon 一张卡，卡顶显示累计金额 / 累计保留金 / 累计应付。
-// 数据全公司共享（走 store.ts），全部文字中英双语。
+// 完全照用户给的 PDF 样式，做一张可编辑、可一键列印的 A4「进度付款证书」：
+//   顶部公司抬头（名字/注册号/地址/电话/邮箱，从 config.company 读，无 logo）
+//   → 标题 → 项目信息 → 分包商/claim 信息 → 计算表(工程/变更/预支/保留金/
+//     加项/扣项/本期应付) → 签名栏。金额相关的小计/保留金/净额/应付全自动算。
+//
+// 页面两层：
+//   · 列表：按 subcon 分组，列出每张证书（第几期 + 项目 + 本期应付）
+//   · 证书：点开某张 → 整张 A4 证书，字段可直接改，右上「🖨 列印」一键打印
+// 数据全公司共享（走 store.ts）。文字中英双语。
 // ============================================================================
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as store from '../lib/store'
-import type { SubconClaim } from '../types'
-import { formatMoney, parseAmount, round2, sumAmounts } from '../lib/money'
+import type { CertData, SubconClaim } from '../types'
+import { company } from '../config'
+import { parseAmount, round2 } from '../lib/money'
 import { friendlyError } from '../lib/errors'
 import { useI18n } from '../lib/i18n'
 
-// 一期算出来的派生数字
-function calcClaim(gross: number, pct: number) {
-  const retention = round2((gross * pct) / 100)
-  const net = round2(gross - retention)
-  return { retention, net }
+// 金额显示：0 显示 "-"（照 PDF），否则千分位两位小数
+function fmtAmt(n: number): string {
+  const v = round2(n)
+  if (v === 0) return '-'
+  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+// 输入框失焦后回填：0/空 → 空（靠 placeholder 显示 "-"）；否则千分位
+function fmtInput(n: number): string {
+  const v = round2(n)
+  return v === 0 ? '' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// 计算表（照 PDF 的加减逻辑）
+function compute(d: {
+  workdone: number
+  vo: number
+  advance3: number
+  retentionPct: number
+  addAdvance: number
+  addKsk: number
+  addOthers: number
+  dedPrevious: number
+  dedKsk: number
+  dedBackcharge: number
+}) {
+  const subtotalA = round2(d.workdone + d.vo + d.advance3)
+  const retention = round2((subtotalA * d.retentionPct) / 100)
+  const subtotalB = round2(d.addAdvance + d.addKsk + d.addOthers)
+  const nett = round2(subtotalA - retention + subtotalB)
+  const dedTotal = round2(d.dedPrevious + d.dedKsk + d.dedBackcharge)
+  const totalDue = round2(nett - dedTotal)
+  return { subtotalA, retention, subtotalB, nett, totalDue }
 }
 
 export function Certificate() {
@@ -29,7 +59,8 @@ export function Certificate() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [certs, setCerts] = useState<SubconClaim[]>([])
-  const [addingSubcon, setAddingSubcon] = useState(false)
+  // 正在打开哪张证书：SubconClaim=编辑现有，'new'=新建，null=看列表
+  const [openDoc, setOpenDoc] = useState<SubconClaim | 'new' | null>(null)
 
   async function load() {
     setLoading(true)
@@ -46,7 +77,6 @@ export function Certificate() {
     load()
   }, [])
 
-  // 按 subcon 分组，每组按期次排好
   const groups = useMemo(() => {
     const map = new Map<string, SubconClaim[]>()
     for (const c of certs) {
@@ -57,7 +87,20 @@ export function Certificate() {
     return Array.from(map.entries()).map(([subcon, list]) => ({ subcon, list }))
   }, [certs])
 
-  const existingSubcons = groups.map((g) => g.subcon)
+  // ---- 打开某张证书：整屏显示 A4 文档 ----
+  if (openDoc) {
+    return (
+      <CertDoc
+        claim={openDoc === 'new' ? null : openDoc}
+        onClose={() => setOpenDoc(null)}
+        onSaved={() => {
+          setOpenDoc(null)
+          load()
+        }}
+        onError={setError}
+      />
+    )
+  }
 
   if (loading)
     return <div className="py-16 text-center text-slate-500">{t('加载中…', 'Loading…')}</div>
@@ -65,335 +108,170 @@ export function Certificate() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-3">
-      {/* 标题卡 */}
       <div className="rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 p-4 shadow-md">
         <div className="text-sm font-semibold text-slate-100">
           📄 {t('进度证书 / Cert', 'Progress Certificates')}
         </div>
         <div className="mt-1 text-xs text-slate-300">
-          {t('QS 记录每个分包商每期 claim；累计与本期应付自动算。', 'QS record of each subcon’s claims; cumulative & net auto-calculated.')}
+          {t('照公司格式的分包商进度付款证书，可一键列印。', 'Subcon progress-payment certificates, one-click print.')}
         </div>
       </div>
 
-      {/* 新增承包商 */}
-      {addingSubcon ? (
-        <AddClaimForm
-          existingSubcons={existingSubcons}
-          onSaved={() => {
-            setAddingSubcon(false)
-            load()
-          }}
-          onCancel={() => setAddingSubcon(false)}
-          onError={setError}
-        />
-      ) : (
-        <button
-          onClick={() => setAddingSubcon(true)}
-          className="w-full rounded-2xl bg-white py-3 text-sm font-medium text-amber-600 shadow-sm hover:bg-amber-50"
-        >
-          {t('＋ 新增承包商 / claim', '＋ New subcon / claim')}
-        </button>
-      )}
+      <button
+        onClick={() => setOpenDoc('new')}
+        className="w-full rounded-2xl bg-white py-3 text-sm font-medium text-amber-600 shadow-sm hover:bg-amber-50"
+      >
+        {t('＋ 新建证书', '＋ New certificate')}
+      </button>
 
-      {groups.length === 0 && !addingSubcon && (
+      {groups.length === 0 && (
         <div className="rounded-2xl bg-white py-8 text-center text-sm text-slate-400 shadow-sm">
-          {t('还没有 Cert 记录，点上面「＋ 新增承包商」', 'No certificates yet — tap “＋ New subcon” above')}
+          {t('还没有证书，点上面「＋ 新建证书」', 'No certificates yet — tap “＋ New certificate” above')}
         </div>
       )}
 
-      {/* 每个 subcon 一张卡 */}
       {groups.map((g) => (
-        <SubconCard key={g.subcon} subcon={g.subcon} list={g.list} onChanged={load} onError={setError} />
+        <div key={g.subcon} className="overflow-hidden rounded-2xl bg-white shadow-sm">
+          <div className="bg-slate-100 px-4 py-2 text-sm font-bold text-slate-800">🏗 {g.subcon}</div>
+          <div className="divide-y divide-slate-100">
+            {g.list.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setOpenDoc(c)}
+                className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-amber-50"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700">
+                    {t('第', 'Claim ')}
+                    {c.claim_no}
+                    {t('期', '')}
+                    {c.cert?.projectTitle ? ' · ' + c.cert.projectTitle : ''}
+                    {c.claim_month ? ' · ' + c.claim_month : ''}
+                  </div>
+                  <div className="text-[11px] text-slate-400">{t('点开查看 / 列印', 'Open / print')}</div>
+                </div>
+                <div className="shrink-0 text-right text-sm font-semibold text-emerald-700">
+                  RM {fmtAmt(c.gross_amount)}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   )
 }
 
-// ---- 一个分包商一张卡 ----
-function SubconCard({
-  subcon,
-  list,
-  onChanged,
-  onError,
-}: {
-  subcon: string
-  list: SubconClaim[]
-  onChanged: () => void
-  onError: (msg: string) => void
-}) {
-  const { t } = useI18n()
-  const [adding, setAdding] = useState(false)
-
-  // 汇总
-  const sumGross = sumAmounts(list.map((c) => c.gross_amount))
-  const sumRet = sumAmounts(list.map((c) => calcClaim(c.gross_amount, c.retention_pct).retention))
-  const sumNet = round2(sumGross - sumRet)
-  const nextClaimNo = list.length ? Math.max(...list.map((c) => c.claim_no)) + 1 : 1
-
-  // 逐期累计
-  let running = 0
-  const rows = list.map((c) => {
-    running = round2(running + c.gross_amount)
-    return { claim: c, cumulative: running }
-  })
-
-  return (
-    <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-      {/* 卡头：名字 + 汇总 */}
-      <div className="bg-slate-100 px-4 py-2.5">
-        <div className="text-sm font-bold text-slate-800">🏗 {subcon}</div>
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
-          <span>
-            {t('累计金额', 'Total')} <b className="text-slate-700">{formatMoney(sumGross)}</b>
-          </span>
-          <span>
-            {t('累计保留金', 'Retention')} <b className="text-amber-700">{formatMoney(sumRet)}</b>
-          </span>
-          <span>
-            {t('累计应付', 'Net payable')} <b className="text-emerald-700">{formatMoney(sumNet)}</b>
-          </span>
-        </div>
-      </div>
-
-      {/* 每期 */}
-      <div className="divide-y divide-slate-100">
-        {rows.map((r) => (
-          <ClaimRow
-            key={r.claim.id}
-            claim={r.claim}
-            cumulative={r.cumulative}
-            onChanged={onChanged}
-            onError={onError}
-          />
-        ))}
-      </div>
-
-      {/* 加一期 */}
-      {adding ? (
-        <AddClaimForm
-          fixedSubcon={subcon}
-          nextClaimNo={nextClaimNo}
-          onSaved={() => {
-            setAdding(false)
-            onChanged()
-          }}
-          onCancel={() => setAdding(false)}
-          onError={onError}
-        />
-      ) : (
-        <button
-          onClick={() => setAdding(true)}
-          className="w-full border-t border-slate-100 py-2.5 text-sm text-amber-600 hover:bg-amber-50"
-        >
-          {t('＋ 加一期', '＋ Add claim')}
-        </button>
-      )}
-    </div>
-  )
-}
-
-// ---- 一期：收起显示，点开编辑 ----
-function ClaimRow({
-  claim: c,
-  cumulative,
-  onChanged,
-  onError,
-}: {
-  claim: SubconClaim
-  cumulative: number
-  onChanged: () => void
-  onError: (msg: string) => void
-}) {
-  const { t } = useI18n()
-  const [open, setOpen] = useState(false)
-  const { retention, net } = calcClaim(c.gross_amount, c.retention_pct)
-
-  // 编辑草稿
-  const [month, setMonth] = useState(c.claim_month ?? '')
-  const [gross, setGross] = useState(c.gross_amount.toFixed(2))
-  const [pct, setPct] = useState(String(c.retention_pct))
-  const [note, setNote] = useState(c.note ?? '')
-
-  function openEdit() {
-    setMonth(c.claim_month ?? '')
-    setGross(c.gross_amount.toFixed(2))
-    setPct(String(c.retention_pct))
-    setNote(c.note ?? '')
-    setOpen(true)
-  }
-  async function confirmEdit() {
-    try {
-      await store.saveCertificate({
-        id: c.id,
-        subcon: c.subcon,
-        claim_no: c.claim_no,
-        claim_month: month || null,
-        gross_amount: parseAmount(gross),
-        retention_pct: parseAmount(pct),
-        note: note || null,
-      })
-      setOpen(false)
-      onChanged()
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
-    }
-  }
-  async function remove() {
-    if (!window.confirm(t('确定删除这一期 claim？', 'Delete this claim?'))) return
-    try {
-      await store.deleteCertificate(c.id)
-      onChanged()
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  return (
-    <div>
-      {/* 收起态 */}
-      <button onClick={() => (open ? setOpen(false) : openEdit())} className="w-full px-4 py-2.5 text-left">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-slate-700">
-              {t('第', 'Claim ')}
-              {c.claim_no}
-              {t('期', '')}
-              {c.claim_month ? ' · ' + c.claim_month : ''}
-            </div>
-            <div className="text-[11px] text-slate-400">
-              {t('保留金', 'Retention')} {c.retention_pct}% (−{formatMoney(retention)}) ·{' '}
-              {t('应付', 'Net')} {formatMoney(net)}
-            </div>
-          </div>
-          <div className="shrink-0 text-right">
-            <div className="text-sm font-semibold text-red-600">{formatMoney(c.gross_amount)}</div>
-            <div className="text-[10px] text-slate-400">
-              {t('累计', 'Cum.')} {formatMoney(cumulative)}
-            </div>
-          </div>
-        </div>
-      </button>
-
-      {/* 展开编辑 */}
-      {open && (
-        <div className="space-y-2 border-l-8 border-amber-500 bg-amber-100 px-4 py-3">
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="mb-0.5 block text-[10px] text-slate-500">{t('月份', 'Month')}</span>
-              <input
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-                placeholder="2026-07"
-                className={ctlCls}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-0.5 block text-[10px] text-slate-500">
-                {t('本期金额', 'Gross amount')}
-              </span>
-              <input
-                inputMode="decimal"
-                value={gross}
-                onChange={(e) => setGross(e.target.value)}
-                className={ctlCls + ' text-right'}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-0.5 block text-[10px] text-slate-500">
-                {t('保留金 %', 'Retention %')}
-              </span>
-              <input
-                inputMode="decimal"
-                value={pct}
-                onChange={(e) => setPct(e.target.value)}
-                className={ctlCls + ' text-right'}
-              />
-            </label>
-            <div className="rounded-md bg-white px-2 py-1 text-right text-xs">
-              <div className="text-slate-500">
-                {t('保留金', 'Retention')}{' '}
-                <b>{formatMoney(calcClaim(parseAmount(gross), parseAmount(pct)).retention)}</b>
-              </div>
-              <div className="text-emerald-700">
-                {t('应付', 'Net')}{' '}
-                <b>{formatMoney(calcClaim(parseAmount(gross), parseAmount(pct)).net)}</b>
-              </div>
-            </div>
-          </div>
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder={t('备注（可选）', 'Note (optional)')}
-            className={ctlCls}
-          />
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={confirmEdit}
-              className="flex-1 rounded-lg bg-emerald-500 py-2 text-sm font-bold text-white hover:bg-emerald-600"
-            >
-              ✅ {t('确认', 'Confirm')}
-            </button>
-            <button
-              onClick={() => setOpen(false)}
-              className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-bold text-slate-600 hover:bg-slate-300"
-            >
-              ❎ {t('取消', 'Cancel')}
-            </button>
-          </div>
-          <div className="text-right">
-            <button onClick={remove} className="text-xs text-slate-400 hover:text-red-600">
-              {t('删除', 'Delete')}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ---- 新增一期（新承包商 或 现有承包商加一期通用）----
-function AddClaimForm({
-  fixedSubcon,
-  nextClaimNo,
-  existingSubcons,
+// ============================================================================
+// 一张 A4 证书（可编辑 + 一键列印）
+// ============================================================================
+function CertDoc({
+  claim,
+  onClose,
   onSaved,
-  onCancel,
   onError,
 }: {
-  fixedSubcon?: string
-  nextClaimNo?: number
-  existingSubcons?: string[]
+  claim: SubconClaim | null
+  onClose: () => void
   onSaved: () => void
-  onCancel: () => void
   onError: (msg: string) => void
 }) {
   const { t } = useI18n()
-  const [subcon, setSubcon] = useState(fixedSubcon ?? '')
-  const [claimNo, setClaimNo] = useState(String(nextClaimNo ?? 1))
-  const [month, setMonth] = useState('')
-  const [gross, setGross] = useState('')
-  const [pct, setPct] = useState('10') // 保留金常见 10%，可改
-  const [note, setNote] = useState('')
+  const c = claim?.cert ?? null
+
+  // 草稿：金额一律用字符串存（方便输入 + 失焦格式化），文字直接字符串
+  const initAmt = (n?: number) => fmtInput(n ?? 0)
+  const [f, setF] = useState<Record<string, string>>({
+    claimPeriod: c?.claimPeriod ?? '',
+    refLA: c?.refLA ?? '',
+    subconRef: c?.subconRef ?? '',
+    dateCommencement: c?.dateCommencement ?? '',
+    dateCompletion: c?.dateCompletion ?? '',
+    projectTitle: c?.projectTitle ?? '',
+    subContractor: c?.subContractor ?? claim?.subcon ?? '',
+    trade: c?.trade ?? '',
+    contractSum: c?.contractSum ?? '',
+    retentionPct: String(c?.retentionPct ?? claim?.retention_pct ?? 5),
+    claimNo: String(c?.claimNo ?? claim?.claim_no ?? 1),
+    periodEnding: c?.periodEnding ?? '',
+    valuationDate: c?.valuationDate ?? '',
+    termOfPayment: c?.termOfPayment ?? '45 days',
+    workdone: initAmt(c?.workdone),
+    vo: initAmt(c?.vo),
+    advance3: initAmt(c?.advance3),
+    addAdvance: initAmt(c?.addAdvance),
+    addKsk: initAmt(c?.addKsk),
+    addOthers: initAmt(c?.addOthers),
+    dedPrevious: initAmt(c?.dedPrevious),
+    dedKsk: initAmt(c?.dedKsk),
+    dedBackcharge: initAmt(c?.dedBackcharge),
+    preparedBy: c?.preparedBy ?? '',
+    verifiedBy: c?.verifiedBy ?? '',
+    checkedBy: c?.checkedBy ?? '',
+    approvedBy: c?.approvedBy ?? '',
+  })
   const [busy, setBusy] = useState(false)
+  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
+  const num = (k: string) => parseAmount(f[k])
+
+  const calc = compute({
+    workdone: num('workdone'),
+    vo: num('vo'),
+    advance3: num('advance3'),
+    retentionPct: parseAmount(f.retentionPct),
+    addAdvance: num('addAdvance'),
+    addKsk: num('addKsk'),
+    addOthers: num('addOthers'),
+    dedPrevious: num('dedPrevious'),
+    dedKsk: num('dedKsk'),
+    dedBackcharge: num('dedBackcharge'),
+  })
+  const claimNoPad = String(Math.max(1, Math.round(parseAmount(f.claimNo)) || 1)).padStart(2, '0')
 
   async function save() {
-    if (!subcon.trim()) {
-      onError(t('请填分包商名称。', 'Please enter a subcon name.'))
-      return
-    }
-    if (parseAmount(gross) <= 0) {
-      onError(t('请填本期金额。', 'Please enter the gross amount.'))
+    if (!f.subContractor.trim()) {
+      onError(t('请填分包商名字（Sub-Contractor）。', 'Please enter the Sub-Contractor name.'))
       return
     }
     setBusy(true)
     try {
+      const cert: CertData = {
+        claimPeriod: f.claimPeriod || undefined,
+        refLA: f.refLA || undefined,
+        subconRef: f.subconRef || undefined,
+        dateCommencement: f.dateCommencement || undefined,
+        dateCompletion: f.dateCompletion || undefined,
+        projectTitle: f.projectTitle || undefined,
+        subContractor: f.subContractor.trim(),
+        trade: f.trade || undefined,
+        contractSum: f.contractSum || undefined,
+        retentionPct: parseAmount(f.retentionPct),
+        claimNo: Math.max(1, Math.round(parseAmount(f.claimNo)) || 1),
+        periodEnding: f.periodEnding || undefined,
+        valuationDate: f.valuationDate || undefined,
+        termOfPayment: f.termOfPayment || undefined,
+        workdone: num('workdone'),
+        vo: num('vo'),
+        advance3: num('advance3'),
+        addAdvance: num('addAdvance'),
+        addKsk: num('addKsk'),
+        addOthers: num('addOthers'),
+        dedPrevious: num('dedPrevious'),
+        dedKsk: num('dedKsk'),
+        dedBackcharge: num('dedBackcharge'),
+        preparedBy: f.preparedBy || undefined,
+        verifiedBy: f.verifiedBy || undefined,
+        checkedBy: f.checkedBy || undefined,
+        approvedBy: f.approvedBy || undefined,
+      }
       await store.saveCertificate({
-        subcon: subcon.trim(),
-        claim_no: Math.max(1, Math.round(parseAmount(claimNo)) || 1),
-        claim_month: month || null,
-        gross_amount: parseAmount(gross),
-        retention_pct: parseAmount(pct),
-        note: note || null,
+        id: claim?.id,
+        subcon: cert.subContractor!,
+        claim_no: cert.claimNo!,
+        claim_month: cert.periodEnding ?? null,
+        gross_amount: calc.totalDue,
+        retention_pct: cert.retentionPct ?? 0,
+        cert,
       })
       onSaved()
     } catch (err) {
@@ -402,115 +280,281 @@ function AddClaimForm({
       setBusy(false)
     }
   }
-  function onKey(e: KeyboardEvent) {
-    if (e.key === 'Enter') save()
+  async function remove() {
+    if (!claim) return
+    if (!window.confirm(t('确定删除这张证书？', 'Delete this certificate?'))) return
+    try {
+      await store.deleteCertificate(claim.id)
+      onSaved()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
   }
 
+  // 注意：下面用「函数调用」返回 <input>，不要写成 <T/> 组件，
+  // 否则每次输入都会重建组件导致输入框失焦。
+  const txt = (k: string, cls = '') => (
+    <input
+      value={f[k]}
+      onChange={(e) => set(k, e.target.value)}
+      className={'bg-transparent focus:bg-amber-50 focus:outline-none ' + cls}
+    />
+  )
+  const amt = (k: string) => (
+    <input
+      value={f[k]}
+      inputMode="decimal"
+      placeholder="-"
+      onChange={(e) => set(k, e.target.value)}
+      onBlur={() => set(k, fmtInput(parseAmount(f[k])))}
+      className="w-full bg-transparent text-right placeholder:text-black focus:bg-amber-50 focus:outline-none"
+    />
+  )
+  const numColW = 'w-28'
+
   return (
-    <div className="space-y-2 rounded-2xl border-l-8 border-amber-500 bg-amber-100 p-4 shadow-sm">
-      <div className="text-sm font-semibold text-slate-700">
-        {fixedSubcon ? t('加一期 claim', 'Add claim') : t('新增承包商 / claim', 'New subcon / claim')}
-      </div>
-      {!fixedSubcon && (
-        <>
-          <input
-            list="subcon-list"
-            value={subcon}
-            onChange={(e) => setSubcon(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={t('分包商名称（如 subcon-ksl）', 'Subcon name')}
-            className={ctlCls}
-          />
-          <datalist id="subcon-list">
-            {(existingSubcons ?? []).map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
-        </>
-      )}
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] text-slate-500">{t('第几期', 'Claim no.')}</span>
-          <input
-            inputMode="numeric"
-            value={claimNo}
-            onChange={(e) => setClaimNo(e.target.value)}
-            onKeyDown={onKey}
-            className={ctlCls + ' text-right'}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] text-slate-500">{t('月份', 'Month')}</span>
-          <input
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="2026-07"
-            className={ctlCls}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] text-slate-500">
-            {t('本期金额', 'Gross amount')}
-          </span>
-          <input
-            inputMode="decimal"
-            value={gross}
-            onChange={(e) => setGross(e.target.value)}
-            onKeyDown={onKey}
-            placeholder={t('金额', 'Amount')}
-            className={ctlCls + ' text-right'}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] text-slate-500">
-            {t('保留金 %', 'Retention %')}
-          </span>
-          <input
-            inputMode="decimal"
-            value={pct}
-            onChange={(e) => setPct(e.target.value)}
-            onKeyDown={onKey}
-            className={ctlCls + ' text-right'}
-          />
-        </label>
-      </div>
-      {/* 实时预览 应付/保留金 */}
-      <div className="rounded-md bg-white px-3 py-1.5 text-xs text-slate-600">
-        {t('本期保留金', 'Retention')}{' '}
-        <b className="text-amber-700">
-          {formatMoney(calcClaim(parseAmount(gross), parseAmount(pct)).retention)}
-        </b>{' '}
-        · {t('本期应付', 'Net payable')}{' '}
-        <b className="text-emerald-700">
-          {formatMoney(calcClaim(parseAmount(gross), parseAmount(pct)).net)}
-        </b>
-      </div>
-      <input
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        onKeyDown={onKey}
-        placeholder={t('备注（可选）', 'Note (optional)')}
-        className={ctlCls}
-      />
-      <div className="flex items-center gap-2 pt-1">
-        <button
-          onClick={save}
-          disabled={busy}
-          className="flex-1 rounded-lg bg-amber-500 py-2 text-sm font-bold text-white hover:bg-amber-600 disabled:opacity-50"
-        >
-          {t('保存', 'Save')}
+    <div className="min-h-screen bg-slate-200">
+      {/* 工具条（不列印）*/}
+      <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-2 bg-slate-800 px-4 py-2 text-white">
+        <button onClick={onClose} className="text-sm">
+          ← {t('返回', 'Back')}
         </button>
-        <button
-          onClick={onCancel}
-          className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-bold text-slate-600 hover:bg-slate-300"
-        >
-          {t('取消', 'Cancel')}
-        </button>
+        <div className="flex items-center gap-2">
+          {claim && (
+            <button onClick={remove} className="rounded bg-slate-600 px-3 py-1.5 text-sm hover:bg-red-600">
+              {t('删除', 'Delete')}
+            </button>
+          )}
+          <button
+            onClick={save}
+            disabled={busy}
+            className="rounded bg-emerald-500 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50"
+          >
+            💾 {t('保存', 'Save')}
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="rounded bg-amber-500 px-3 py-1.5 text-sm font-semibold hover:bg-amber-600"
+          >
+            🖨 {t('列印', 'Print')}
+          </button>
+        </div>
+      </div>
+
+      {/* ===== A4 证书本体 ===== */}
+      <div className="cert-doc mx-auto my-4 max-w-[820px] bg-white p-8 text-[12px] leading-tight text-black shadow-lg print:my-0 print:max-w-none print:p-0 print:shadow-none">
+        {/* 抬头 */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-lg font-extrabold tracking-wide">{company.name}</div>
+            <div className="text-[11px]">{company.regNo}</div>
+          </div>
+          <div className="text-right text-[10px] leading-snug text-slate-700">
+            <div>{company.address}</div>
+            <div>☎ {company.phone}</div>
+            <div>✉ {company.email}</div>
+          </div>
+        </div>
+        <div className="mt-2 border-t-4 border-black" />
+
+        {/* 顶部期间 + 标题 */}
+        <div className="mt-1">{txt('claimPeriod', 'w-72 text-[10px]')}</div>
+        <div className="my-1 border-y border-black py-1 text-center text-[13px] font-bold">
+          CERTIFICATE OF PAYMENT FOR SUB-CONTRACTOR CLAIM NO. {claimNoPad}
+        </div>
+
+        {/* 项目信息块 */}
+        <div className="mt-2 space-y-0.5">
+          {[
+            ['Ref of LA', 'refLA'],
+            ['Sub-Contractor Ref', 'subconRef'],
+            ['Date of Commencement', 'dateCommencement'],
+            ['Date of Completion', 'dateCompletion'],
+            ['Project Tile', 'projectTitle'],
+          ].map(([label, k]) => (
+            <div key={k} className="flex">
+              <span className="w-52 font-bold">{label}</span>
+              <span className="w-3">:</span>
+              {txt(k, 'flex-1 font-bold')}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 border-t border-black" />
+
+        {/* 分包商 / claim 信息块 */}
+        <div className="mt-2 space-y-0.5">
+          {[
+            ['Sub-Contractor', 'subContractor'],
+            ['Trade', 'trade'],
+            ['Contract Sum', 'contractSum'],
+          ].map(([label, k]) => (
+            <div key={k} className="flex">
+              <span className="w-52 font-bold">{label}</span>
+              <span className="w-3">:</span>
+              {txt(k, 'flex-1 font-bold')}
+            </div>
+          ))}
+          <div className="flex">
+            <span className="w-52 font-bold">Limit of Retention</span>
+            <span className="w-3">:</span>
+            <span className="font-bold">{txt('retentionPct', 'w-10 text-right font-bold')}%</span>
+          </div>
+          {[
+            ['Claim No', 'claimNo'],
+            ['Period Ending', 'periodEnding'],
+            ['Valuation Date', 'valuationDate'],
+            ['Term of Payment', 'termOfPayment'],
+          ].map(([label, k]) => (
+            <div key={k} className="flex">
+              <span className="w-52 font-bold">{label}</span>
+              <span className="w-3">:</span>
+              {txt(k, 'flex-1 font-bold')}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 border-t border-black" />
+
+        {/* ===== 计算表 ===== */}
+        <div className="mt-3 space-y-1.5">
+          <CalcRow no="1" desc="VALUE OF WORKDONE" descBold>
+            {amt('workdone')}
+          </CalcRow>
+          <CalcRow no="2" desc="ADDITION (Variation Order)">
+            {amt('vo')}
+          </CalcRow>
+          <CalcRow no="3" desc="Advance">
+            {amt('advance3')}
+          </CalcRow>
+          <div className="flex items-center justify-end gap-2">
+            <span className="font-bold">SUB TOTAL</span>
+            <span className="font-bold">RM</span>
+            <span className={numColW + ' border-t border-black text-right font-bold'}>
+              {fmtAmt(calc.subtotalA)}
+            </span>
+          </div>
+
+          <CalcRow no="4" desc="DEDUCTION" />
+          <div className="flex items-center">
+            <span className="w-6" />
+            <span className="flex-1 font-bold">Retention Sum {parseAmount(f.retentionPct)}%</span>
+            <span className="mr-2 font-bold">RM</span>
+            <span className={numColW + ' text-right font-bold'}>{fmtAmt(-calc.retention)}</span>
+          </div>
+
+          <CalcRow no="5" desc="ADDITION" />
+          <CalcRow desc="Advance" indent>
+            {amt('addAdvance')}
+          </CalcRow>
+          <CalcRow desc="KSK" indent>
+            {amt('addKsk')}
+          </CalcRow>
+          <CalcRow desc="Others" indent>
+            {amt('addOthers')}
+          </CalcRow>
+          <div className="flex items-center justify-end gap-2">
+            <span className="font-bold">SUB TOTAL</span>
+            <span className="font-bold">RM</span>
+            <span className={numColW + ' border-t border-black text-right font-bold'}>
+              {fmtAmt(calc.subtotalB)}
+            </span>
+          </div>
+
+          <div className="flex items-center pt-1">
+            <span className="flex-1 pl-6">NETT AMOUNT :</span>
+            <span className="mr-2 border-t border-black font-bold">RM</span>
+            <span className={numColW + ' border-y border-black text-right font-bold'}>
+              {fmtAmt(calc.nett)}
+            </span>
+          </div>
+
+          <CalcRow no="6" desc="DEDUCTION" />
+          <CalcRow desc="Previous Amount Payment" indent>
+            {amt('dedPrevious')}
+          </CalcRow>
+          <CalcRow desc="KSK" indent>
+            {amt('dedKsk')}
+          </CalcRow>
+          <CalcRow desc="Backcharge" indent>
+            {amt('dedBackcharge')}
+          </CalcRow>
+          <div className="flex items-center">
+            <span className="flex-1 pl-6 font-bold">TOTAL AMOUNT DUE TO / (OWE FROM) YOU</span>
+            <span className="mr-2 border-t border-black font-bold">RM</span>
+            <span className={numColW + ' border-y-2 border-black text-right font-bold'}>
+              {fmtAmt(calc.totalDue)}
+            </span>
+          </div>
+        </div>
+
+        {/* ===== 签名栏 ===== */}
+        <table className="mt-8 w-full border-collapse text-[11px]">
+          <tbody>
+            <tr>
+              <td className="h-24 border border-black align-bottom p-2">
+                <div className="font-bold">
+                  Prepared By: {txt('preparedBy', 'w-28')}
+                </div>
+              </td>
+              <td className="h-24 border border-black align-bottom p-2">
+                <div className="font-bold">
+                  Verified by: {txt('verifiedBy', 'w-28')}
+                </div>
+              </td>
+              <td rowSpan={2} className="w-1/3 border border-black align-top p-2">
+                <div className="mb-10 font-bold">
+                  I hereby, agreed and confirm with the amount stated in this certificate
+                </div>
+                <div className="font-bold">{f.subContractor}</div>
+                <div>(Sub Contractor)</div>
+              </td>
+            </tr>
+            <tr>
+              <td className="h-24 border border-black align-bottom p-2">
+                <div className="font-bold">
+                  Checked by: {txt('checkedBy', 'w-28')}
+                </div>
+                <div>(Project Manager)</div>
+              </td>
+              <td className="h-24 border border-black align-bottom p-2">
+                <div className="font-bold">
+                  Approved by: {txt('approvedBy', 'w-28')}
+                </div>
+                <div>(Director)</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   )
 }
 
-const ctlCls =
-  'w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none'
+// 计算表通用行：编号 | 描述 | RM | (金额子元素)
+function CalcRow({
+  no,
+  desc,
+  descBold,
+  indent,
+  children,
+}: {
+  no?: string
+  desc: string
+  descBold?: boolean
+  indent?: boolean
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex items-center">
+      <span className="w-6 shrink-0 text-right pr-2">{no ?? ''}</span>
+      <span className={'flex-1 ' + (indent ? 'pl-0 ' : '') + (descBold ? 'font-bold' : '')}>
+        {desc}
+      </span>
+      {children ? (
+        <>
+          <span className="mr-2 font-bold">RM</span>
+          <span className="w-28 text-right">{children}</span>
+        </>
+      ) : null}
+    </div>
+  )
+}

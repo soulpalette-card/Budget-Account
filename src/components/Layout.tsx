@@ -27,8 +27,8 @@ export function Layout() {
 
   return (
     <div className="min-h-screen">
-      {/* 顶部导航栏 */}
-      <header className="border-b border-slate-200 bg-white">
+      {/* 顶部导航栏（列印时隐藏）*/}
+      <header className="no-print border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-4">
             <span className="text-lg font-bold text-slate-800">

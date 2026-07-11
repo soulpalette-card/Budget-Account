@@ -17,6 +17,7 @@ import { supabase } from './supabase'
 import type {
   Confidence,
   Entry,
+  CertData,
   LogItem,
   Month,
   RecurringTemplate,
@@ -402,7 +403,7 @@ export async function getCertificates(): Promise<SubconClaim[]> {
   return (data ?? []) as SubconClaim[]
 }
 
-// 保存一期 cert：有 id 更新，没 id 新增
+// 保存一张证书：有 id 更新，没 id 新增
 export async function saveCertificate(input: {
   id?: string
   subcon: string
@@ -410,6 +411,7 @@ export async function saveCertificate(input: {
   claim_month?: string | null
   gross_amount?: number
   retention_pct?: number
+  cert?: CertData | null
   note?: string | null
 }): Promise<SubconClaim> {
   const userId = await getUserId()
@@ -418,8 +420,9 @@ export async function saveCertificate(input: {
     subcon: input.subcon,
     claim_no: input.claim_no,
     claim_month: input.claim_month ?? null,
-    gross_amount: round2(input.gross_amount ?? 0), // 金额固定两位小数
+    gross_amount: round2(input.gross_amount ?? 0), // 本期应付总额（列表显示用）
     retention_pct: round2(input.retention_pct ?? 0),
+    cert: input.cert ?? null, // 证书完整内容（jsonb）
     note: input.note ?? null,
   }
   if (input.id) {
