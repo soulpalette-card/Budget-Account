@@ -41,6 +41,9 @@ export function Layout() {
               <NavLink to="/overview" className={linkClass}>
                 {t('6个月总览', '6-Month')}
               </NavLink>
+              <NavLink to="/project" className={linkClass}>
+                {t('项目账', 'Projects')}
+              </NavLink>
               <NavLink to="/subcons" className={linkClass}>
                 {t('分包商', 'Subcon')}
               </NavLink>

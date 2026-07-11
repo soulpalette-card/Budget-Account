@@ -20,6 +20,7 @@ import { Register } from './pages/Register'
 import { ResetPassword } from './pages/ResetPassword'
 import { Account } from './pages/Account'
 import { Overview } from './pages/Overview'
+import { ProjectAccount } from './pages/ProjectAccount'
 import { Subcons } from './pages/Subcons'
 import { Certificate } from './pages/Certificate'
 import { MonthDetail } from './pages/MonthDetail'
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/" element={<Account />} />
             {/* 下面几个是“高级”页面，不放主导航，从设置里进 */}
             <Route path="/overview" element={<Overview />} />
+            <Route path="/project" element={<ProjectAccount />} />
             <Route path="/subcons" element={<Subcons />} />
             <Route path="/certificate" element={<Certificate />} />
             <Route path="/month" element={<MonthDetail />} />

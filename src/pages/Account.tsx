@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
 import * as store from '../lib/store'
-import type { Entry, Month } from '../types'
+import type { Entry, Month, Project } from '../types'
 import { config } from '../config'
 import { formatMoney, parseAmount, round2, sumAmounts } from '../lib/money'
 import { friendlyError } from '../lib/errors'
@@ -180,8 +180,12 @@ export function Account() {
   const [months, setMonths] = useState<Month[]>([])
   const [byMonth, setByMonth] = useState<Record<string, Entry[]>>({})
   const [selectedId, setSelectedId] = useState('')
-  const [addTarget, setAddTarget] = useState<null | 'budget' | 'temp'>(null) // 记一笔弹窗目标
+  // 记一笔弹窗目标：kind=预算/临时；projectId=归到哪个项目(空=Office)
+  const [addTarget, setAddTarget] = useState<null | { kind: 'budget' | 'temp'; projectId: string | null }>(null)
   const [openingLocked, setOpeningLocked] = useState(true) // 承上结余那一格：默认锁定
+  const [projects, setProjects] = useState<Project[]>([])
+  const [addingProject, setAddingProject] = useState(false) // 是否显示「新增项目」输入
+  const [newProjectName, setNewProjectName] = useState('')
 
   async function load(keepId?: string) {
     setLoading(true)
@@ -192,18 +196,32 @@ export function Account() {
         await store.addMonth({ label: currentYm(), opening_balance: 0 })
         ms = await store.getMonths()
       }
-      const all = await store.getAllEntries()
+      const [all, projs] = await Promise.all([store.getAllEntries(), store.getProjects()])
       const grouped: Record<string, Entry[]> = {}
       for (const m of ms) grouped[m.id] = []
       for (const e of all) if (grouped[e.month_id]) grouped[e.month_id].push(e)
       setMonths(ms)
       setByMonth(grouped)
+      setProjects(projs)
       const pick = keepId && ms.some((m) => m.id === keepId) ? keepId : ms[0].id
       setSelectedId((prev) => (prev && ms.some((m) => m.id === prev) ? prev : pick))
     } catch (err) {
       setError(friendlyError(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function createProject() {
+    const name = newProjectName.trim()
+    if (!name) return
+    try {
+      await store.addProject(name)
+      setNewProjectName('')
+      setAddingProject(false)
+      load(selectedId)
+    } catch (err) {
+      setError(friendlyError(err))
     }
   }
 
@@ -218,14 +236,7 @@ export function Account() {
   const allEntries = (byMonth[selectedId] ?? []).filter((e) => !e.is_deleted)
   const plannedEntries = allEntries.filter((e) => !e.is_unexpected) // 预算项
   const unexpectedEntries = allEntries.filter((e) => e.is_unexpected) // 临时新款
-  // 按日期排序（没填日期的排最后）
-  const byDate = (a: Entry, b: Entry) => {
-    const da = a.entry_date ?? '9999-99-99'
-    const db = b.entry_date ?? '9999-99-99'
-    return da < db ? -1 : da > db ? 1 : 0
-  }
-  const incomeRows = allEntries.filter((e) => e.zone === 'income').sort(byDate) // 收入框
-  const expenseRows = allEntries.filter((e) => e.zone === 'expense').sort(byDate) // 支出框
+  const officeRows = allEntries.filter((e) => !e.project_id) // Office：不归任何项目的记录
   const calc =
     calcMap[selectedId] ??
     ({
@@ -248,6 +259,7 @@ export function Account() {
         id: entry.id,
         month_id: entry.month_id,
         zone: patch.zone !== undefined ? patch.zone : entry.zone,
+        project_id: entry.project_id, // 保持归属项目不变
         entry_date: patch.entry_date !== undefined ? patch.entry_date : entry.entry_date,
         amount: patch.amount !== undefined ? patch.amount : entry.amount,
         category: patch.category !== undefined ? patch.category : entry.category,
@@ -301,6 +313,7 @@ export function Account() {
       await store.saveEntry({
         month_id: target.id,
         zone: entry.zone,
+        project_id: entry.project_id, // 复制到下月时保持同一项目归属
         entry_date: entry.entry_date,
         amount: entry.amount,
         category: entry.category,
@@ -487,52 +500,76 @@ export function Account() {
         </div>
       </div>
 
-      {/* ===== 收入框 / 支出框：分开、按日期排序 ===== */}
-      <ZoneBox
-        title={t('收入 Income', 'Income')}
-        tone="income"
-        rows={incomeRows}
-        budgetSub={calc.plannedIncome}
-        actualSub={calc.realizedIncome}
-        onSave={saveField}
-        onToggle={toggleSettled}
-        onCopy={copyToNext}
-        onRemove={removeRow}
-      />
-      <ZoneBox
-        title={t('支出 Expense', 'Expense')}
-        tone="expense"
-        rows={expenseRows}
-        budgetSub={calc.plannedExpense}
-        actualSub={calc.realizedExpense}
+      {/* ===== A. Office 办公室 ===== */}
+      <BucketSection
+        title={t('A. Office 办公室', 'A. Office')}
+        subtitle={t('公司整体收支（不归任何项目）', 'Company-wide (not tied to a project)')}
+        rows={officeRows}
+        projectId={null}
+        onAdd={(kind) => setAddTarget({ kind, projectId: null })}
         onSave={saveField}
         onToggle={toggleSettled}
         onCopy={copyToNext}
         onRemove={removeRow}
       />
 
-      {/* 添加按钮 */}
-      <div className="flex overflow-hidden rounded-2xl bg-white text-sm shadow-sm">
+      {/* ===== B. 项目 Projects ===== */}
+      <div className="flex items-center justify-between pt-2">
+        <span className="text-sm font-bold text-slate-700">{t('B. 项目 Projects', 'B. Projects')}</span>
         <button
-          onClick={() => setAddTarget('budget')}
-          className="flex-1 py-2.5 text-amber-600 hover:bg-amber-50"
+          onClick={() => setAddingProject(true)}
+          className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700"
         >
-          {t('＋ 加预算项', '＋ Budget item')}
-        </button>
-        <button
-          onClick={() => setAddTarget('temp')}
-          className="flex-1 border-l border-slate-100 py-2.5 text-emerald-600 hover:bg-emerald-50"
-        >
-          {t('＋ 临时新款', '＋ Extra')}
+          {t('＋ 新增项目', '＋ New project')}
         </button>
       </div>
+      {addingProject && (
+        <div className="flex items-center gap-2 rounded-2xl bg-white p-3 shadow-sm">
+          <input
+            autoFocus
+            value={newProjectName}
+            onChange={(e) => setNewProjectName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && createProject()}
+            placeholder={t('项目名称，如 KSL', 'Project name, e.g. KSL')}
+            className={inputCls + ' flex-1'}
+          />
+          <button onClick={createProject} className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-600">
+            {t('建', 'Add')}
+          </button>
+          <button onClick={() => { setAddingProject(false); setNewProjectName('') }} className="text-sm text-slate-400">
+            {t('取消', 'Cancel')}
+          </button>
+        </div>
+      )}
+      {projects.filter((p) => p.active).length === 0 && !addingProject && (
+        <div className="rounded-2xl bg-white py-6 text-center text-xs text-slate-400 shadow-sm">
+          {t('还没有项目，点上面「＋ 新增项目」', 'No projects yet — tap “＋ New project”')}
+        </div>
+      )}
+      {projects
+        .filter((p) => p.active)
+        .map((p) => (
+          <BucketSection
+            key={p.id}
+            title={'🏗 ' + p.name}
+            rows={allEntries.filter((e) => e.project_id === p.id)}
+            projectId={p.id}
+            onAdd={(kind) => setAddTarget({ kind, projectId: p.id })}
+            onSave={saveField}
+            onToggle={toggleSettled}
+            onCopy={copyToNext}
+            onRemove={removeRow}
+          />
+        ))}
 
       {/* ===== 记一笔弹窗 ===== */}
       {addTarget && (
         <AddSheet
-          unexpected={addTarget === 'temp'}
-          locked={locked && addTarget === 'temp'}
+          unexpected={addTarget.kind === 'temp'}
+          locked={false}
           monthId={selectedId}
+          projectId={addTarget.projectId}
+          projectName={addTarget.projectId ? projects.find((p) => p.id === addTarget.projectId)?.name ?? '' : t('Office 办公室', 'Office')}
           onClose={() => setAddTarget(null)}
           onAdded={() => load(selectedId)}
           onError={setError}
@@ -554,6 +591,99 @@ function compactNum(n: number): string {
 
 const inputCls =
   'w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none'
+
+// 按日期排序（没填日期的排最后）
+function byDate(a: Entry, b: Entry): number {
+  const da = a.entry_date ?? '9999-99-99'
+  const db = b.entry_date ?? '9999-99-99'
+  return da < db ? -1 : da > db ? 1 : 0
+}
+// 一组记录里某个区（收入/支出）的「预算」小计（只算规划项的预算金额）
+function budgetOfZone(rows: Entry[], zone: 'income' | 'expense'): number {
+  return sumAmounts(rows.filter((e) => !e.is_unexpected && e.zone === zone).map((e) => e.amount))
+}
+// 一组记录里某个区的「实际」小计（每笔 actualOf 之和）
+function actualOfZone(rows: Entry[], zone: 'income' | 'expense'): number {
+  return sumAmounts(rows.filter((e) => e.zone === zone).map(actualOf))
+}
+
+// ---- 一个「块」：Office 或某个项目。里面放 收入框 + 支出框 + 加按钮 + 本块净额 ----
+function BucketSection({
+  title,
+  subtitle,
+  rows,
+  onAdd,
+  onSave,
+  onToggle,
+  onCopy,
+  onRemove,
+}: {
+  title: string
+  subtitle?: string
+  rows: Entry[]
+  projectId: string | null
+  onAdd: (kind: 'budget' | 'temp') => void
+  onSave: (e: Entry, patch: Partial<Entry>) => void
+  onToggle: (e: Entry) => void
+  onCopy: (e: Entry) => void
+  onRemove: (id: string) => void
+}) {
+  const { t } = useI18n()
+  const income = rows.filter((e) => e.zone === 'income').sort(byDate)
+  const expense = rows.filter((e) => e.zone === 'expense').sort(byDate)
+  // 本块实际净额 = 实际收入 − 实际支出
+  const actualNet = round2(actualOfZone(rows, 'income') - actualOfZone(rows, 'expense'))
+
+  return (
+    <div className="rounded-2xl bg-slate-100/70 p-2">
+      <div className="flex items-center justify-between px-1 pb-1.5">
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-slate-700">{title}</div>
+          {subtitle && <div className="text-[11px] text-slate-400">{subtitle}</div>}
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-[10px] text-slate-400">{t('本块实际净额', 'Net (actual)')}</div>
+          <div className={'text-sm font-bold tabular-nums ' + (actualNet < 0 ? 'text-red-600' : 'text-emerald-600')}>
+            {actualNet >= 0 ? '+' : '-'}
+            {compactNum(Math.abs(actualNet))}
+          </div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <ZoneBox
+          title={t('收入 Income', 'Income')}
+          tone="income"
+          rows={income}
+          budgetSub={budgetOfZone(rows, 'income')}
+          actualSub={actualOfZone(rows, 'income')}
+          onSave={onSave}
+          onToggle={onToggle}
+          onCopy={onCopy}
+          onRemove={onRemove}
+        />
+        <ZoneBox
+          title={t('支出 Expense', 'Expense')}
+          tone="expense"
+          rows={expense}
+          budgetSub={budgetOfZone(rows, 'expense')}
+          actualSub={actualOfZone(rows, 'expense')}
+          onSave={onSave}
+          onToggle={onToggle}
+          onCopy={onCopy}
+          onRemove={onRemove}
+        />
+        <div className="flex overflow-hidden rounded-2xl bg-white text-sm shadow-sm">
+          <button onClick={() => onAdd('budget')} className="flex-1 py-2.5 text-amber-600 hover:bg-amber-50">
+            {t('＋ 加预算项', '＋ Budget item')}
+          </button>
+          <button onClick={() => onAdd('temp')} className="flex-1 border-l border-slate-100 py-2.5 text-emerald-600 hover:bg-emerald-50">
+            {t('＋ 临时新款', '＋ Extra')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ---- 收入框 / 支出框：一个框只放一种，按日期排好，底部带小计 ----
 function ZoneBox({
@@ -1171,6 +1301,8 @@ function AddSheet({
   unexpected,
   locked = false,
   monthId,
+  projectId = null,
+  projectName = '',
   onClose,
   onAdded,
   onError,
@@ -1178,6 +1310,8 @@ function AddSheet({
   unexpected: boolean
   locked?: boolean
   monthId: string
+  projectId?: string | null
+  projectName?: string
   onClose: () => void
   onAdded: () => void
   onError: (msg: string) => void
@@ -1201,6 +1335,7 @@ function AddSheet({
       await store.saveEntry({
         month_id: monthId,
         zone: dir,
+        project_id: projectId,
         entry_date: date || null,
         amount: amt,
         category: category || null,
@@ -1233,6 +1368,12 @@ function AddSheet({
             ✕
           </button>
         </div>
+        {projectName && (
+          <div className="mb-3 rounded-md bg-slate-100 px-3 py-1.5 text-xs text-slate-600">
+            {t('记到：', 'Goes to: ')}
+            <b>{projectName}</b>
+          </div>
+        )}
         {locked && (
           <div className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
             {t('🔒 预算已锁定，这笔会记入「临时新款」。', '🔒 Budget locked — this goes to “Extra”.')}

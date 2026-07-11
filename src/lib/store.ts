@@ -20,6 +20,7 @@ import type {
   CertData,
   LogItem,
   Month,
+  Project,
   RecurringTemplate,
   ScopeLine,
   Subcon,
@@ -192,6 +193,7 @@ export async function saveEntry(input: {
   id?: string
   month_id: string
   zone: Zone
+  project_id?: string | null
   entry_date?: string | null
   amount?: number
   category?: string | null
@@ -231,6 +233,7 @@ export async function saveEntry(input: {
     user_id: userId, // 记录“谁建的”（现在数据共享，这只是留个痕迹，不再限制可见范围）
     month_id: input.month_id,
     zone: input.zone,
+    project_id: input.project_id ?? null, // 归属项目（空 = Office）
     entry_date: input.entry_date ?? null,
     amount,
     category: input.category ?? null,
@@ -278,6 +281,51 @@ export async function deleteEntry(id: string): Promise<void> {
 // 恢复一条被软删除的记录（把 is_deleted 改回 false）。
 export async function restoreEntry(id: string): Promise<void> {
   const { error } = await supabase.from('entries').update({ is_deleted: false }).eq('id', id)
+  if (error) throw error
+}
+
+// ============================================================================
+// 三点五、项目（projects）—— 每一笔账归到 Office 或某个项目
+// ============================================================================
+
+// 拿全部项目，在用的排前面，再按排序、名字
+export async function getProjects(): Promise<Project[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('active', { ascending: false })
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as Project[]
+}
+
+// 新增一个项目（排到最后）
+export async function addProject(name: string): Promise<Project> {
+  const userId = await getUserId()
+  const existing = await getProjects()
+  const sortOrder = existing.length > 0 ? Math.max(...existing.map((p) => p.sort_order)) + 1 : 0
+  const { data, error } = await supabase
+    .from('projects')
+    .insert({ user_id: userId, name: name.trim(), sort_order: sortOrder })
+    .select()
+    .single()
+  if (error) throw error
+  return data as Project
+}
+
+// 改项目（改名 / 停用启用 / 排序）
+export async function updateProject(
+  id: string,
+  patch: Partial<Pick<Project, 'name' | 'active' | 'sort_order'>>,
+): Promise<void> {
+  const { error } = await supabase.from('projects').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+// 删除项目（该项目下的记录 project_id 会自动变回 Office/空）。界面删前会二次确认。
+export async function deleteProject(id: string): Promise<void> {
+  const { error } = await supabase.from('projects').delete().eq('id', id)
   if (error) throw error
 }
 

@@ -32,11 +32,22 @@ export interface Month {
   created_at: string // 创建时间
 }
 
+// projects 表：项目（如 KSL、Seputeh）。一笔账归到 Office(空) 或某个项目。
+export interface Project {
+  id: string // 唯一编号
+  user_id: string // 谁建的（共享，不限可见范围）
+  name: string // 项目名称
+  active: boolean // 在用 / 停用
+  sort_order: number // 排序
+  created_at: string // 创建时间
+}
+
 // entries 表：每一笔收入/支出/突发都是一行
 export interface Entry {
   id: string // 唯一编号
   user_id: string // 属于哪个用户
   month_id: string // 属于哪个月
+  project_id: string | null // 归属项目：空 = Office 办公室开支；有值 = 某个项目
   zone: Zone // 属于哪个区块（收入/支出/突发）
   entry_date: string | null // 这笔钱的日期（可以空着）
   amount: number // 金额（数据库里是 numeric(14,2)，永远两位小数）
