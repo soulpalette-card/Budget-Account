@@ -33,7 +33,8 @@ function fmtInput(n: number): string {
 }
 
 // 从分包商主档带出证书资料（新建证书时预填，只留当期金额给人填）
-function certFromSubcon(sub: Subcon, claimNo: number): CertData {
+//   dedPrevious：之前各期已付合计（第 2 期起自动填进「6 扣项-已付款」，避免重复付）
+function certFromSubcon(sub: Subcon, claimNo: number, dedPrevious: number): CertData {
   const trade = (sub.scopes ?? [])
     .map((s) => s.element)
     .filter(Boolean)
@@ -50,6 +51,7 @@ function certFromSubcon(sub: Subcon, claimNo: number): CertData {
     refLA: sub.ref_la || undefined,
     subconRef: sub.subcon_ref || undefined,
     claimNo,
+    dedPrevious: dedPrevious > 0 ? dedPrevious : undefined,
   }
 }
 
@@ -109,7 +111,9 @@ export function Certificate() {
   function startFromSubcon(sub: Subcon) {
     const existing = certs.filter((c) => c.subcon === sub.name)
     const nextNo = existing.length ? Math.max(...existing.map((c) => c.claim_no)) + 1 : 1
-    setPrefill(certFromSubcon(sub, nextNo))
+    // 之前各期已付合计（第 2 期起自动带进「已付款」扣项）
+    const prevPaid = round2(existing.reduce((sum, c) => sum + (c.gross_amount || 0), 0))
+    setPrefill(certFromSubcon(sub, nextNo, nextNo > 1 ? prevPaid : 0))
     setPicking(false)
     setOpenDoc('new')
   }
@@ -296,6 +300,12 @@ function CertDoc({
     approvedBy: c?.approvedBy ?? '',
   })
   const [busy, setBusy] = useState(false)
+  // 本地错误：保存失败时直接显示在证书顶部（否则错误会被列表页盖住看不到）
+  const [errMsg, setErrMsg] = useState('')
+  const fail = (m: string) => {
+    setErrMsg(m)
+    onError(m)
+  }
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
   const num = (k: string) => parseAmount(f[k])
 
@@ -315,10 +325,11 @@ function CertDoc({
 
   async function save() {
     if (!f.subContractor.trim()) {
-      onError(t('请填分包商名字（Sub-Contractor）。', 'Please enter the Sub-Contractor name.'))
+      fail(t('请填分包商名字（Sub-Contractor）。', 'Please enter the Sub-Contractor name.'))
       return
     }
     setBusy(true)
+    setErrMsg('')
     try {
       const cert: CertData = {
         claimPeriod: f.claimPeriod || undefined,
@@ -360,7 +371,7 @@ function CertDoc({
       })
       onSaved()
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      fail(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -372,7 +383,7 @@ function CertDoc({
       await store.deleteCertificate(claim.id)
       onSaved()
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      fail(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -425,6 +436,13 @@ function CertDoc({
           </button>
         </div>
       </div>
+
+      {/* 保存失败时的错误提示（就地显示，不会被列表页盖住）*/}
+      {errMsg && (
+        <div className="no-print mx-auto mt-2 max-w-[820px] rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+          ⚠️ {errMsg}
+        </div>
+      )}
 
       {/* ===== A4 证书本体 ===== */}
       <div className="cert-doc mx-auto my-4 max-w-[820px] bg-white p-8 text-[12px] leading-tight text-black shadow-lg print:my-0 print:max-w-none print:p-0 print:shadow-none">

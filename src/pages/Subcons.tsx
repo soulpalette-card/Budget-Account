@@ -170,6 +170,12 @@ function SubconForm({
       : [{ element: '', rate: '', unit: '' }],
   )
   const [busy, setBusy] = useState(false)
+  // 本地错误：保存失败时就地显示（否则会被列表页盖住看不到）
+  const [errMsg, setErrMsg] = useState('')
+  const fail = (m: string) => {
+    setErrMsg(m)
+    onError(m)
+  }
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
 
   function setScope(i: number, key: 'element' | 'rate' | 'unit', v: string) {
@@ -184,10 +190,11 @@ function SubconForm({
 
   async function save() {
     if (!f.name.trim()) {
-      onError(t('请填分包商名字。', 'Please enter the sub-contractor name.'))
+      fail(t('请填分包商名字。', 'Please enter the sub-contractor name.'))
       return
     }
     setBusy(true)
+    setErrMsg('')
     try {
       const scopeLines: ScopeLine[] = scopes.map((row) => ({
         element: row.element.trim(),
@@ -220,7 +227,7 @@ function SubconForm({
       })
       onSaved()
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      fail(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -234,7 +241,7 @@ function SubconForm({
       await store.deleteSubcon(subcon.id)
       onSaved()
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      fail(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -279,6 +286,11 @@ function SubconForm({
           </button>
         </div>
       </div>
+
+      {/* 保存失败时的错误提示 */}
+      {errMsg && (
+        <div className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">⚠️ {errMsg}</div>
+      )}
 
       {/* 基本资料 */}
       <div className={sectionCls}>
