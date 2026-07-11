@@ -259,7 +259,8 @@ export function Account() {
         id: entry.id,
         month_id: entry.month_id,
         zone: patch.zone !== undefined ? patch.zone : entry.zone,
-        project_id: entry.project_id, // 保持归属项目不变
+        // 归属项目：patch 里带了就改（用于「移动到项目」），否则保持不变
+        project_id: patch.project_id !== undefined ? patch.project_id : entry.project_id,
         entry_date: patch.entry_date !== undefined ? patch.entry_date : entry.entry_date,
         amount: patch.amount !== undefined ? patch.amount : entry.amount,
         category: patch.category !== undefined ? patch.category : entry.category,
@@ -506,6 +507,7 @@ export function Account() {
         subtitle={t('公司整体收支（不归任何项目）', 'Company-wide (not tied to a project)')}
         rows={officeRows}
         projectId={null}
+        projects={projects}
         onAdd={(kind) => setAddTarget({ kind, projectId: null })}
         onSave={saveField}
         onToggle={toggleSettled}
@@ -554,6 +556,7 @@ export function Account() {
             title={'🏗 ' + p.name}
             rows={allEntries.filter((e) => e.project_id === p.id)}
             projectId={p.id}
+            projects={projects}
             onAdd={(kind) => setAddTarget({ kind, projectId: p.id })}
             onSave={saveField}
             onToggle={toggleSettled}
@@ -612,6 +615,7 @@ function BucketSection({
   title,
   subtitle,
   rows,
+  projects,
   onAdd,
   onSave,
   onToggle,
@@ -622,6 +626,7 @@ function BucketSection({
   subtitle?: string
   rows: Entry[]
   projectId: string | null
+  projects: Project[]
   onAdd: (kind: 'budget' | 'temp') => void
   onSave: (e: Entry, patch: Partial<Entry>) => void
   onToggle: (e: Entry) => void
@@ -656,6 +661,7 @@ function BucketSection({
           rows={income}
           budgetSub={budgetOfZone(rows, 'income')}
           actualSub={actualOfZone(rows, 'income')}
+          projects={projects}
           onSave={onSave}
           onToggle={onToggle}
           onCopy={onCopy}
@@ -667,6 +673,7 @@ function BucketSection({
           rows={expense}
           budgetSub={budgetOfZone(rows, 'expense')}
           actualSub={actualOfZone(rows, 'expense')}
+          projects={projects}
           onSave={onSave}
           onToggle={onToggle}
           onCopy={onCopy}
@@ -696,6 +703,7 @@ function ZoneBox({
   onToggle,
   onCopy,
   onRemove,
+  projects,
 }: {
   title: string
   tone: 'income' | 'expense'
@@ -706,6 +714,7 @@ function ZoneBox({
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
   onRemove: (id: string) => void
+  projects: Project[]
 }) {
   const { t } = useI18n()
   const isInc = tone === 'income'
@@ -745,6 +754,7 @@ function ZoneBox({
               key={e.id}
               entry={e}
               planned={!e.is_unexpected}
+              projects={projects}
               onSave={onSave}
               onToggle={onToggle}
               onCopy={onCopy}
@@ -775,6 +785,7 @@ function EntryItem({
   entry: e,
   planned,
   frozen = false,
+  projects = [],
   onSave,
   onToggle,
   onCopy,
@@ -783,6 +794,7 @@ function EntryItem({
   entry: Entry
   planned: boolean
   frozen?: boolean
+  projects?: Project[]
   onSave: (e: Entry, patch: Partial<Entry>) => void
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
@@ -1265,6 +1277,27 @@ function EntryItem({
             >
               {draftIsIncome ? t('改为支出', 'To Expense') : t('改为收入', 'To Income')}
             </button>
+          </div>
+
+          {/* 归属项目：一键把这笔移到 Office / 某个项目（选了立刻生效）*/}
+          <div className="flex items-center gap-2 rounded-md bg-white/60 px-2 py-1.5">
+            <span className="shrink-0 text-xs font-medium text-slate-500">
+              🔀 {t('归属', 'Belongs to')}
+            </span>
+            <select
+              value={e.project_id ?? ''}
+              onChange={(ev) => onSave(e, { project_id: ev.target.value || null })}
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
+            >
+              <option value="">{t('Office 办公室', 'Office')}</option>
+              {projects
+                .filter((p) => p.active || p.id === e.project_id)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
           </div>
 
           {/* ✅ 确认 / ❎ 取消 —— 填好点 ✅ 才保存 */}
