@@ -78,6 +78,21 @@ function compute(d: {
   return { subtotalA, retention, subtotalB, nett, totalDue }
 }
 
+// 汇总一个 subcon 的“到目前为止”状态（工程量是累计的，取最新一期）
+function summarizeSubcon(list: SubconClaim[]) {
+  const sorted = [...list].sort((a, b) => a.claim_no - b.claim_no)
+  const latest = sorted[sorted.length - 1]
+  const prev = sorted[sorted.length - 2]
+  const lc = latest?.cert
+  const wd = lc?.workdone ?? 0 // 当前累计工程量 = 最新一期封面第 1 项
+  const vo = lc?.vo ?? 0
+  const adv = lc?.advance3 ?? 0
+  const retentionHeld = round2(((wd + vo + adv) * (lc?.retentionPct ?? 0)) / 100) // 目前扣着的保留金
+  const paidToDate = round2(sorted.reduce((s, c) => s + (c.gross_amount || 0), 0)) // 累计已付（各期应付之和）
+  const thisPeriod = round2(wd - (prev?.cert?.workdone ?? 0)) // 本期新增工程量 = 最新 − 上一期
+  return { workdoneToDate: wd, voToDate: vo, retentionHeld, paidToDate, thisPeriod, latestNo: latest?.claim_no ?? 0 }
+}
+
 export function Certificate() {
   const { t } = useI18n()
   const [loading, setLoading] = useState(true)
@@ -229,34 +244,64 @@ export function Certificate() {
         </div>
       )}
 
-      {groups.map((g) => (
-        <div key={g.subcon} className="overflow-hidden rounded-2xl bg-white shadow-sm">
-          <div className="bg-slate-100 px-4 py-2 text-sm font-bold text-slate-800">🏗 {g.subcon}</div>
-          <div className="divide-y divide-slate-100">
-            {g.list.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setOpenDoc(c)}
-                className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-amber-50"
-              >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-slate-700">
-                    {t('第', 'Claim ')}
-                    {c.claim_no}
-                    {t('期', '')}
-                    {c.cert?.projectTitle ? ' · ' + c.cert.projectTitle : ''}
-                    {c.claim_month ? ' · ' + c.claim_month : ''}
+      {groups.map((g) => {
+        const sm = summarizeSubcon(g.list)
+        return (
+          <div key={g.subcon} className="overflow-hidden rounded-2xl bg-white shadow-sm">
+            <div className="flex items-center justify-between bg-slate-100 px-4 py-2 text-sm font-bold text-slate-800">
+              <span>🏗 {g.subcon}</span>
+              <span className="text-[11px] font-normal text-slate-500">
+                {t('已到第', 'Up to claim ')}
+                {sm.latestNo}
+                {t('期', '')}
+              </span>
+            </div>
+
+            {/* 汇总条：当前累计工程量 / 累计已付 / 保留金结余 */}
+            <div className="grid grid-cols-3 gap-px border-b border-slate-100 bg-slate-100 text-center">
+              <div className="bg-white px-2 py-2">
+                <div className="text-[10px] text-slate-400">{t('当前累计工程量', 'Work done to date')}</div>
+                <div className="text-sm font-bold text-slate-800">RM {fmtAmt(sm.workdoneToDate)}</div>
+              </div>
+              <div className="bg-white px-2 py-2">
+                <div className="text-[10px] text-slate-400">{t('累计已付', 'Paid to date')}</div>
+                <div className="text-sm font-bold text-emerald-700">RM {fmtAmt(sm.paidToDate)}</div>
+              </div>
+              <div className="bg-white px-2 py-2">
+                <div className="text-[10px] text-slate-400">{t('保留金结余', 'Retention held')}</div>
+                <div className="text-sm font-bold text-amber-700">RM {fmtAmt(sm.retentionHeld)}</div>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              {g.list.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setOpenDoc(c)}
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-amber-50"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-700">
+                      {t('第', 'Claim ')}
+                      {c.claim_no}
+                      {t('期', '')}
+                      {c.cert?.projectTitle ? ' · ' + c.cert.projectTitle : ''}
+                      {c.claim_month ? ' · ' + c.claim_month : ''}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {t('累计工程量', 'Workdone')} RM {fmtAmt(c.cert?.workdone ?? 0)}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-400">{t('点开查看 / 列印', 'Open / print')}</div>
-                </div>
-                <div className="shrink-0 text-right text-sm font-semibold text-emerald-700">
-                  RM {fmtAmt(c.gross_amount)}
-                </div>
-              </button>
-            ))}
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold text-emerald-700">RM {fmtAmt(c.gross_amount)}</div>
+                    <div className="text-[10px] text-slate-400">{t('本期应付', 'This claim')}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
