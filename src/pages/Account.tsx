@@ -13,7 +13,7 @@
 // 数据共享（登录用户看同一份），全部走 store.ts。
 // ============================================================================
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
 import * as store from '../lib/store'
 import type { Entry, Month } from '../types'
 import { config } from '../config'
@@ -21,6 +21,55 @@ import { formatMoney, parseAmount, round2, sumAmounts } from '../lib/money'
 import { friendlyError } from '../lib/errors'
 import { iconFor } from '../lib/icons'
 import { useI18n } from '../lib/i18n'
+
+// ============================================================================
+// 单个可锁定输入框：默认锁定(灰底、禁止输入) + 右边一个 🔒/🔓 按钮，点按钮才解锁这一格。
+// 每一格自己管自己的锁，互不影响。列印时锁按钮不显示。
+// ============================================================================
+function LockInput({
+  locked,
+  onToggle,
+  wrapClass = '',
+  className = '',
+  ...props
+}: { locked: boolean; onToggle: () => void; wrapClass?: string; className?: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className={'flex items-center gap-1 ' + wrapClass}>
+      <input
+        {...props}
+        disabled={locked}
+        className={'min-w-0 flex-1 ' + className + (locked ? ' cursor-not-allowed bg-slate-100 text-slate-400' : '')}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onToggle}
+        className="no-print shrink-0 text-xs leading-none text-slate-400 hover:text-amber-600"
+        title={locked ? '解锁 Unlock' : '锁定 Lock'}
+      >
+        {locked ? '🔒' : '🔓'}
+      </button>
+    </div>
+  )
+}
+
+// 给「非 input」的东西(如 select)加锁：包一层，右边放 🔒/🔓 按钮
+function LockWrap({ locked, onToggle, children }: { locked: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      {children}
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onToggle}
+        className="no-print shrink-0 text-xs leading-none text-slate-400 hover:text-amber-600"
+        title={locked ? '解锁 Unlock' : '锁定 Lock'}
+      >
+        {locked ? '🔒' : '🔓'}
+      </button>
+    </div>
+  )
+}
 
 function currentYm(): string {
   const d = new Date()
@@ -132,8 +181,7 @@ export function Account() {
   const [byMonth, setByMonth] = useState<Record<string, Entry[]>>({})
   const [selectedId, setSelectedId] = useState('')
   const [addTarget, setAddTarget] = useState<null | 'budget' | 'temp'>(null) // 记一笔弹窗目标
-  const [pageLocked, setPageLocked] = useState(true) // 字段锁定：默认锁，防误改
-  const [unlocked, setUnlocked] = useState<Set<string>>(new Set()) // 已单独解锁的项（记录 id 或 '__opening__'）
+  const [openingLocked, setOpeningLocked] = useState(true) // 承上结余那一格：默认锁定
 
   async function load(keepId?: string) {
     setLoading(true)
@@ -276,9 +324,6 @@ export function Account() {
     return <div className="py-16 text-center text-slate-500">{t('加载中…', 'Loading…')}</div>
 
   const locked = false // 旧「预算锁定」语义已停用（保留给 AddSheet 判断，永远 false）
-  // 新：字段锁定 —— 默认锁定，防止误改；点某一笔才解锁那一笔（'__opening__' 代表承上结余）
-  const isUnlocked = (k: string) => !pageLocked || unlocked.has(k)
-  const unlock = (k: string) => setUnlocked((s) => new Set(s).add(k))
 
   // 预算 vs 实际（本月净流，收−支），以及差异从哪来
   const budgetNet = round2(calc.plannedIncome - calc.plannedExpense)
@@ -309,24 +354,7 @@ export function Account() {
           ))}
         </select>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (pageLocked) setPageLocked(false)
-              else {
-                setPageLocked(true)
-                setUnlocked(new Set())
-              }
-            }}
-            className={
-              'rounded-md px-2.5 py-1 text-sm font-medium ' +
-              (pageLocked
-                ? 'border border-slate-300 text-slate-600 hover:bg-slate-100'
-                : 'bg-yellow-500 text-slate-900 hover:bg-yellow-400')
-            }
-            title={t('锁定后点某一笔可单独解锁修改', 'When locked, tap an item to unlock just that one')}
-          >
-            {pageLocked ? '🔓 ' + t('解锁', 'Unlock') : '🔒 ' + t('锁定', 'Lock')}
-          </button>
+          <span className="text-[11px] text-slate-400">{t('🔒每格自带锁，点🔓解锁', '🔒 each field locks; tap 🔓 to edit')}</span>
           <button onClick={() => window.print()} className="text-slate-500">
             🖨
           </button>
@@ -394,23 +422,20 @@ export function Account() {
         <div className="mt-2 text-right text-xs text-amber-900/90">
           {t('承上结余', 'Balance b/f')}{' '}
           {isFirstMonth ? (
-            <input
+            <LockInput
+              locked={openingLocked}
+              onToggle={() => setOpeningLocked((v) => !v)}
+              wrapClass="inline-flex w-28 align-middle"
               type="text"
               inputMode="decimal"
               key={selectedId + '-' + calc.opening}
               defaultValue={calc.opening.toFixed(2)}
-              readOnly={!isUnlocked('__opening__')}
-              onClick={!isUnlocked('__opening__') ? () => unlock('__opening__') : undefined}
-              title={!isUnlocked('__opening__') ? t('点一下解锁再改', 'Tap to unlock') : undefined}
               onBlur={(e) => {
                 const v = parseAmount(e.target.value)
                 e.target.value = v.toFixed(2)
                 if (v !== calc.opening) saveOpening(v)
               }}
-              className={
-                'w-20 rounded px-1 py-0.5 text-right text-amber-900 focus:outline-none ' +
-                (isUnlocked('__opening__') ? 'bg-white/50' : 'cursor-pointer bg-white/20')
-              }
+              className="w-16 rounded bg-white/50 px-1 py-0.5 text-right text-amber-900 focus:outline-none"
             />
           ) : (
             <b>{formatMoney(calc.opening)}</b>
@@ -473,8 +498,6 @@ export function Account() {
         onToggle={toggleSettled}
         onCopy={copyToNext}
         onRemove={removeRow}
-        isUnlocked={isUnlocked}
-        onUnlock={unlock}
       />
       <ZoneBox
         title={t('支出 Expense', 'Expense')}
@@ -486,8 +509,6 @@ export function Account() {
         onToggle={toggleSettled}
         onCopy={copyToNext}
         onRemove={removeRow}
-        isUnlocked={isUnlocked}
-        onUnlock={unlock}
       />
 
       {/* 添加按钮 */}
@@ -545,8 +566,6 @@ function ZoneBox({
   onToggle,
   onCopy,
   onRemove,
-  isUnlocked,
-  onUnlock,
 }: {
   title: string
   tone: 'income' | 'expense'
@@ -557,8 +576,6 @@ function ZoneBox({
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
   onRemove: (id: string) => void
-  isUnlocked: (k: string) => boolean
-  onUnlock: (k: string) => void
 }) {
   const { t } = useI18n()
   const isInc = tone === 'income'
@@ -598,8 +615,6 @@ function ZoneBox({
               key={e.id}
               entry={e}
               planned={!e.is_unexpected}
-              editable={isUnlocked(e.id)}
-              onUnlock={() => onUnlock(e.id)}
               onSave={onSave}
               onToggle={onToggle}
               onCopy={onCopy}
@@ -630,8 +645,6 @@ function EntryItem({
   entry: e,
   planned,
   frozen = false,
-  editable = true,
-  onUnlock,
   onSave,
   onToggle,
   onCopy,
@@ -640,8 +653,6 @@ function EntryItem({
   entry: Entry
   planned: boolean
   frozen?: boolean
-  editable?: boolean
-  onUnlock?: () => void
   onSave: (e: Entry, patch: Partial<Entry>) => void
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
@@ -649,11 +660,16 @@ function EntryItem({
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
-  // 锁定时：任何“会改数据”的点击都先解锁这一笔，不直接生效
-  const guard = (fn: () => void) => () => {
-    if (editable) fn()
-    else onUnlock?.()
-  }
+  // 每一格自己的锁：默认锁定，点该格的 🔓 才解锁。open 编辑器时全部重新锁上。
+  const [lockedFields, setLockedFields] = useState<Set<string>>(new Set())
+  const fLocked = (k: string) => !lockedFields.has(k) // 没在集合里 = 还锁着
+  const toggleField = (k: string) =>
+    setLockedFields((s) => {
+      const n = new Set(s)
+      if (n.has(k)) n.delete(k)
+      else n.add(k)
+      return n
+    })
   const isIncome = e.zone === 'income'
   const amtColor = isIncome ? 'text-emerald-600' : 'text-red-600'
   const signed = (isIncome ? '+' : '-') + compactNum(e.amount) // 例：+120,244.58 / -9,150.00
@@ -704,9 +720,10 @@ function EntryItem({
       })),
     )
   }
-  // 打开编辑（先把草稿对齐当前值）
+  // 打开编辑（先把草稿对齐当前值，并把所有格子重新锁上）
   function openEditor() {
     resetDraft()
+    setLockedFields(new Set())
     setOpen(true)
   }
   // ✅ 确认：把草稿一次性写回
@@ -789,13 +806,12 @@ function EntryItem({
     <div>
       {/* 收起态：项目 ｜ 预算 ｜ 实际（同一行左右对照）*/}
       <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 px-3 py-2">
-        {/* 项目（点＝展开编辑；锁定时点＝先解锁这一笔）*/}
+        {/* 项目（点＝展开编辑）*/}
         <button
-          onClick={guard(() => (open ? cancelEdit() : openEditor()))}
+          onClick={() => (open ? cancelEdit() : openEditor())}
           className="flex min-w-0 items-center gap-2 text-left"
-          title={!editable ? t('已锁定，点一下解锁这一笔', 'Locked — tap to unlock this item') : undefined}
         >
-          <span className="text-base">{editable ? iconFor(e) : '🔒'}</span>
+          <span className="text-base">{iconFor(e)}</span>
           <span className="min-w-0">
             {/* 日期明显显示：橙色小标签 */}
             <span className="mb-0.5 flex items-center gap-1">
@@ -830,7 +846,7 @@ function EntryItem({
         <div className="text-right text-xs tabular-nums">
           {isRunning(e) ? (
             // 累计项：显示已花，下面小字显示剩余，点开去加每天记录
-            <button onClick={guard(openEditor)} className="no-print text-right">
+            <button onClick={openEditor} className="no-print text-right">
               <span className={'font-semibold ' + amtColor}>
                 {isIncome ? '+' : '-'}
                 {compactNum(spentOf(e))}
@@ -843,7 +859,7 @@ function EntryItem({
             <span className={'font-semibold ' + amtColor}>{signed}</span>
           ) : e.settled ? (
             <button
-              onClick={guard(() => onToggle(e))}
+              onClick={() => onToggle(e)}
               className={'no-print font-semibold ' + amtColor}
               title={t('已加入实际（点击移出）', 'In actual (tap to remove)')}
             >
@@ -851,7 +867,7 @@ function EntryItem({
             </button>
           ) : (
             <button
-              onClick={guard(() => onToggle(e))}
+              onClick={() => onToggle(e)}
               className="no-print rounded bg-slate-500 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-600"
               title={t('点一下：加入实际', 'Tap to add to actual')}
             >
@@ -862,7 +878,7 @@ function EntryItem({
       </div>
 
       {/* 展开态：预算锁定时只读；否则可编辑 */}
-      {open && editable && frozen && (
+      {open && frozen && (
         <div className="space-y-1 bg-slate-50 px-4 py-3 text-xs text-slate-500">
           <div>
             {t(
@@ -887,7 +903,7 @@ function EntryItem({
           </div>
         </div>
       )}
-      {open && editable && !frozen && (
+      {open && !frozen && (
         <div className="space-y-2 border-l-8 border-amber-500 bg-amber-100 px-4 py-3">
           {running ? (
             <>
@@ -895,7 +911,9 @@ function EntryItem({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <div className="mb-0.5 text-[10px] text-slate-400">{t('预算金额', 'Budget')}</div>
-                  <input
+                  <LockInput
+                    locked={fLocked('r-budget')}
+                    onToggle={() => toggleField('r-budget')}
                     type="text"
                     inputMode="decimal"
                     value={draft.amount}
@@ -933,19 +951,25 @@ function EntryItem({
                     }
                   >
                     <div className="flex items-center gap-2">
-                      <input
+                      <LockInput
+                        locked={fLocked(`log-${i}-date`)}
+                        onToggle={() => toggleField(`log-${i}-date`)}
+                        wrapClass="min-w-0 flex-1"
                         type="date"
                         value={l.date}
                         onChange={(ev) => updateLog(i, { date: ev.target.value })}
-                        className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
+                        className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
                       />
-                      <input
+                      <LockInput
+                        locked={fLocked(`log-${i}-amt`)}
+                        onToggle={() => toggleField(`log-${i}-amt`)}
+                        wrapClass="w-28"
                         type="text"
                         inputMode="decimal"
                         value={l.amount}
                         onChange={(ev) => updateLog(i, { amount: ev.target.value })}
                         placeholder={t('金额', 'Amount')}
-                        className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
+                        className="rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
                       />
                       <button
                         onClick={() => removeLog(i)}
@@ -954,12 +978,15 @@ function EntryItem({
                         ✕
                       </button>
                     </div>
-                    <input
+                    <LockInput
+                      locked={fLocked(`log-${i}-desc`)}
+                      onToggle={() => toggleField(`log-${i}-desc`)}
+                      wrapClass="mt-1"
                       type="text"
                       value={l.desc}
                       onChange={(ev) => updateLog(i, { desc: ev.target.value })}
                       placeholder={t('名称（可选，如 麦当劳）', 'Name (optional)')}
-                      className="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-xs focus:border-amber-500 focus:outline-none"
+                      className="rounded border border-slate-200 px-2 py-1 text-xs focus:border-amber-500 focus:outline-none"
                     />
                   </div>
                 ))}
@@ -977,13 +1004,17 @@ function EntryItem({
             <>
               {/* 普通模式：日期 + 金额（改动只进草稿，点 ✅ 才存）*/}
               <div className="grid grid-cols-2 gap-2">
-                <input
+                <LockInput
+                  locked={fLocked('n-date')}
+                  onToggle={() => toggleField('n-date')}
                   type="date"
                   value={draft.entry_date}
                   onChange={(ev) => setDraft({ ...draft, entry_date: ev.target.value })}
                   className={inputCls}
                 />
-                <input
+                <LockInput
+                  locked={fLocked('n-amt')}
+                  onToggle={() => toggleField('n-amt')}
                   type="text"
                   inputMode="decimal"
                   value={draft.amount}
@@ -1004,7 +1035,9 @@ function EntryItem({
           ) : (
             <>
               {/* 拆分模式：日期 + 子项目列表（自动加总）*/}
-              <input
+              <LockInput
+                locked={fLocked('s-date')}
+                onToggle={() => toggleField('s-date')}
                 type="date"
                 value={draft.entry_date}
                 onChange={(ev) => setDraft({ ...draft, entry_date: ev.target.value })}
@@ -1025,20 +1058,26 @@ function EntryItem({
                       (i % 2 === 0 ? 'bg-sky-200' : 'bg-emerald-200')
                     }
                   >
-                    <input
+                    <LockInput
+                      locked={fLocked(`sub-${i}-desc`)}
+                      onToggle={() => toggleField(`sub-${i}-desc`)}
+                      wrapClass="min-w-0 flex-1"
                       type="text"
                       value={s.desc}
                       onChange={(ev) => updateSub(i, { desc: ev.target.value })}
                       placeholder={t('小项目 如 复印机 / 电话费', 'Item e.g. Copier / Phone')}
-                      className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
+                      className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none"
                     />
-                    <input
+                    <LockInput
+                      locked={fLocked(`sub-${i}-amt`)}
+                      onToggle={() => toggleField(`sub-${i}-amt`)}
+                      wrapClass="w-28"
                       type="text"
                       inputMode="decimal"
                       value={s.amount}
                       onChange={(ev) => updateSub(i, { amount: ev.target.value })}
                       placeholder={t('金额', 'Amount')}
-                      className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
+                      className="rounded border border-slate-300 px-2 py-1 text-right text-sm focus:border-amber-500 focus:outline-none"
                     />
                     <button
                       onClick={() => removeSub(i)}
@@ -1063,7 +1102,9 @@ function EntryItem({
               </button>
             </>
           )}
-          <input
+          <LockInput
+            locked={fLocked('desc')}
+            onToggle={() => toggleField('desc')}
             type="text"
             value={draft.description}
             placeholder={t('说明…', 'Description…')}
@@ -1071,18 +1112,21 @@ function EntryItem({
             className={inputCls}
           />
           <div className="flex items-center gap-2">
-            <select
-              value={draft.category}
-              onChange={(ev) => setDraft({ ...draft, category: ev.target.value })}
-              className={inputCls + ' flex-1'}
-            >
-              <option value="">{t('（未分类）', '(No category)')}</option>
-              {config.categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <LockWrap locked={fLocked('cat')} onToggle={() => toggleField('cat')}>
+              <select
+                value={draft.category}
+                disabled={fLocked('cat')}
+                onChange={(ev) => setDraft({ ...draft, category: ev.target.value })}
+                className={inputCls + ' min-w-0 flex-1' + (fLocked('cat') ? ' cursor-not-allowed bg-slate-100 text-slate-400' : '')}
+              >
+                <option value="">{t('（未分类）', '(No category)')}</option>
+                {config.categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </LockWrap>
             <button
               onClick={() =>
                 setDraft({ ...draft, zone: draftIsIncome ? 'expense' : 'income' })
