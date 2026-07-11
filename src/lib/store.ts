@@ -21,6 +21,8 @@ import type {
   LogItem,
   Month,
   RecurringTemplate,
+  ScopeLine,
+  Subcon,
   SubconClaim,
   SubItem,
   TemplateKind,
@@ -389,7 +391,109 @@ export async function addNextMonth(newLabel: string): Promise<Month> {
 }
 
 // ============================================================================
-// 六、进度证书 / Cert（subcon_claims）—— QS 记录每个分包商的每期 claim
+// 六、分包商主档（subcons）—— 出证书前先建好每个 subcon 的基本资料
+// ============================================================================
+
+// 拿全部分包商，在用的排前面，再按名字排。
+export async function getSubcons(): Promise<Subcon[]> {
+  const { data, error } = await supabase
+    .from('subcons')
+    .select('*')
+    .order('active', { ascending: false })
+    .order('name', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as Subcon[]
+}
+
+// 保存一个分包商：有 id 更新，没 id 新增。返回保存后的完整记录。
+export async function saveSubcon(input: {
+  id?: string
+  name: string
+  entity_type?: 'company' | 'individual'
+  id_no?: string | null
+  contact_person?: string | null
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  project?: string | null
+  scopes?: ScopeLine[] | null
+  contract_sum?: string | null
+  retention_pct?: number
+  date_commencement?: string | null
+  date_completion?: string | null
+  term_of_payment?: string | null
+  bank_name?: string | null
+  bank_account_no?: string | null
+  bank_account_name?: string | null
+  ref_la?: string | null
+  subcon_ref?: string | null
+  note?: string | null
+  active?: boolean
+}): Promise<Subcon> {
+  const userId = await getUserId()
+
+  // 工种价位：金额固定两位小数；空行（没工种也没价位）过滤掉
+  let scopes: ScopeLine[] | null = null
+  if (input.scopes && input.scopes.length > 0) {
+    const cleaned = input.scopes
+      .map((s) => ({
+        element: (s.element ?? '').trim(),
+        rate: round2(s.rate ?? 0),
+        unit: (s.unit ?? '').trim(),
+      }))
+      .filter((s) => s.element !== '' || s.rate !== 0 || s.unit !== '')
+    scopes = cleaned.length > 0 ? cleaned : null
+  }
+
+  const row = {
+    user_id: userId,
+    name: input.name.trim(),
+    entity_type: input.entity_type ?? 'individual',
+    id_no: input.id_no ?? null,
+    contact_person: input.contact_person ?? null,
+    phone: input.phone ?? null,
+    email: input.email ?? null,
+    address: input.address ?? null,
+    project: input.project ?? null,
+    scopes,
+    contract_sum: input.contract_sum ?? null,
+    retention_pct: round2(input.retention_pct ?? 0),
+    date_commencement: input.date_commencement ?? null,
+    date_completion: input.date_completion ?? null,
+    term_of_payment: input.term_of_payment ?? null,
+    bank_name: input.bank_name ?? null,
+    bank_account_no: input.bank_account_no ?? null,
+    bank_account_name: input.bank_account_name ?? null,
+    ref_la: input.ref_la ?? null,
+    subcon_ref: input.subcon_ref ?? null,
+    note: input.note ?? null,
+    active: input.active ?? true,
+  }
+
+  if (input.id) {
+    const { data, error } = await supabase
+      .from('subcons')
+      .update(row)
+      .eq('id', input.id)
+      .select()
+      .single()
+    if (error) throw error
+    return data as Subcon
+  } else {
+    const { data, error } = await supabase.from('subcons').insert(row).select().single()
+    if (error) throw error
+    return data as Subcon
+  }
+}
+
+// 删除一个分包商（界面里删前会二次确认；平时建议用「停用」而不是删）。
+export async function deleteSubcon(id: string): Promise<void> {
+  const { error } = await supabase.from('subcons').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ============================================================================
+// 七、进度证书 / Cert（subcon_claims）—— QS 记录每个分包商的每期 claim
 // ============================================================================
 
 // 拿全部 cert 记录，按 subcon、再按第几期排好

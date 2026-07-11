@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as store from '../lib/store'
-import type { CertData, SubconClaim } from '../types'
+import type { CertData, Subcon, SubconClaim } from '../types'
 import { company } from '../config'
 import { parseAmount, round2 } from '../lib/money'
 import { friendlyError } from '../lib/errors'
@@ -30,6 +30,27 @@ function fmtAmt(n: number): string {
 function fmtInput(n: number): string {
   const v = round2(n)
   return v === 0 ? '' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// 从分包商主档带出证书资料（新建证书时预填，只留当期金额给人填）
+function certFromSubcon(sub: Subcon, claimNo: number): CertData {
+  const trade = (sub.scopes ?? [])
+    .map((s) => s.element)
+    .filter(Boolean)
+    .join(' & ')
+  return {
+    subContractor: sub.name,
+    trade: trade || undefined,
+    projectTitle: sub.project || undefined,
+    contractSum: sub.contract_sum || undefined,
+    retentionPct: sub.retention_pct ?? 0,
+    termOfPayment: sub.term_of_payment || undefined,
+    dateCommencement: sub.date_commencement || undefined,
+    dateCompletion: sub.date_completion || undefined,
+    refLA: sub.ref_la || undefined,
+    subconRef: sub.subcon_ref || undefined,
+    claimNo,
+  }
 }
 
 // 计算表（照 PDF 的加减逻辑）
@@ -59,14 +80,21 @@ export function Certificate() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [certs, setCerts] = useState<SubconClaim[]>([])
+  const [subcons, setSubcons] = useState<Subcon[]>([])
   // 正在打开哪张证书：SubconClaim=编辑现有，'new'=新建，null=看列表
   const [openDoc, setOpenDoc] = useState<SubconClaim | 'new' | null>(null)
+  // 新建证书时的预填内容（从分包商主档带出）；空白证书则为 null
+  const [prefill, setPrefill] = useState<CertData | null>(null)
+  // 是否正在显示「选一个分包商」的选择框
+  const [picking, setPicking] = useState(false)
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      setCerts(await store.getCertificates())
+      const [cs, subs] = await Promise.all([store.getCertificates(), store.getSubcons()])
+      setCerts(cs)
+      setSubcons(subs)
     } catch (err) {
       setError(friendlyError(err))
     } finally {
@@ -76,6 +104,20 @@ export function Certificate() {
   useEffect(() => {
     load()
   }, [])
+
+  // 点某个分包商 → 算出下一期期数 → 预填并打开新证书
+  function startFromSubcon(sub: Subcon) {
+    const existing = certs.filter((c) => c.subcon === sub.name)
+    const nextNo = existing.length ? Math.max(...existing.map((c) => c.claim_no)) + 1 : 1
+    setPrefill(certFromSubcon(sub, nextNo))
+    setPicking(false)
+    setOpenDoc('new')
+  }
+  function startBlank() {
+    setPrefill(null)
+    setPicking(false)
+    setOpenDoc('new')
+  }
 
   const groups = useMemo(() => {
     const map = new Map<string, SubconClaim[]>()
@@ -92,6 +134,7 @@ export function Certificate() {
     return (
       <CertDoc
         claim={openDoc === 'new' ? null : openDoc}
+        prefill={openDoc === 'new' ? prefill : null}
         onClose={() => setOpenDoc(null)}
         onSaved={() => {
           setOpenDoc(null)
@@ -118,11 +161,50 @@ export function Certificate() {
       </div>
 
       <button
-        onClick={() => setOpenDoc('new')}
+        onClick={() => (subcons.filter((s) => s.active).length > 0 ? setPicking(true) : startBlank())}
         className="w-full rounded-2xl bg-white py-3 text-sm font-medium text-amber-600 shadow-sm hover:bg-amber-50"
       >
         {t('＋ 新建证书', '＋ New certificate')}
       </button>
+
+      {/* 选一个分包商（从主档带出资料）*/}
+      {picking && (
+        <div className="rounded-2xl bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-bold text-slate-700">
+              {t('选一个分包商（自动带出资料）', 'Pick a sub-contractor (auto-fill)')}
+            </span>
+            <button onClick={() => setPicking(false)} className="text-xs text-slate-400 hover:text-slate-600">
+              {t('取消', 'Cancel')}
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {subcons
+              .filter((s) => s.active)
+              .map((s) => {
+                const trades = (s.scopes ?? []).map((x) => x.element).filter(Boolean).join('、')
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => startFromSubcon(s)}
+                    className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-amber-400 hover:bg-amber-50"
+                  >
+                    <span className="truncate text-sm font-medium text-slate-700">{s.name}</span>
+                    <span className="ml-2 shrink-0 text-[11px] text-slate-400">
+                      {[trades, s.project].filter(Boolean).join(' · ')}
+                    </span>
+                  </button>
+                )
+              })}
+          </div>
+          <button
+            onClick={startBlank}
+            className="mt-2 w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs text-slate-500 hover:bg-slate-50"
+          >
+            {t('或：建一张空白证书', 'Or: start a blank certificate')}
+          </button>
+        </div>
+      )}
 
       {groups.length === 0 && (
         <div className="rounded-2xl bg-white py-8 text-center text-sm text-slate-400 shadow-sm">
@@ -167,17 +249,20 @@ export function Certificate() {
 // ============================================================================
 function CertDoc({
   claim,
+  prefill,
   onClose,
   onSaved,
   onError,
 }: {
   claim: SubconClaim | null
+  prefill: CertData | null
   onClose: () => void
   onSaved: () => void
   onError: (msg: string) => void
 }) {
   const { t } = useI18n()
-  const c = claim?.cert ?? null
+  // 编辑现有证书用它的 cert；新建时用主档带出的 prefill；都没有就空白
+  const c = claim?.cert ?? prefill ?? null
 
   // 草稿：金额一律用字符串存（方便输入 + 失焦格式化），文字直接字符串
   const initAmt = (n?: number) => fmtInput(n ?? 0)

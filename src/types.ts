@@ -104,6 +104,43 @@ export interface CertData {
   approvedBy?: string // 附 (Director)
 }
 
+// 一个分包商「负责的一个工种 + 价位」：一个 subcon 可以有好几行
+//   例：钢筋工 RM 120 /吨、木工 RM 8 /m²、整包 RM 50000 /lump sum
+export interface ScopeLine {
+  element: string // 负责的元素/工种，例如 BARBENDER、CARPENTER
+  rate: number // 价位（数字）
+  unit: string // 单位，例如 "/吨" "/m²" "/天" "lump sum"，可留空
+}
+
+// subcons 表：分包商主档。一行 = 一个 subcon 的基本资料。
+//   出证书前先把这些填好，出证书时从这里带出（名字/工种/项目/付款期/保留金…）。
+export interface Subcon {
+  id: string // 唯一编号
+  user_id: string // 谁建的（共享，不限可见范围）
+  name: string // 名字（公司/个人，也是证书上的 Sub-Contractor）
+  entity_type: 'company' | 'individual' // 公司 or 个人（决定 id_no 是注册号还是身份证/护照）
+  id_no: string | null // 公司注册号(SSM) 或 身份证/护照号
+  contact_person: string | null // 联系人（公司时用）
+  phone: string | null // 电话
+  email: string | null // 邮箱
+  address: string | null // 地址
+  project: string | null // 项目名，例如 SEPUTEH
+  scopes: ScopeLine[] | null // 负责工种 + 价位（可多行）
+  contract_sum: string | null // 合同额（可填 Nil）
+  retention_pct: number // 保留金百分比（证书默认值）
+  date_commencement: string | null // 开工日
+  date_completion: string | null // 完工日（可写 Until complete）
+  term_of_payment: string | null // 付款期，例如 45 days
+  bank_name: string | null // 银行名字
+  bank_account_no: string | null // 银行户口号
+  bank_account_name: string | null // 户口名字（收款人）
+  ref_la: string | null // Ref of LA（证书栏位）
+  subcon_ref: string | null // Sub-Contractor Ref（证书栏位）
+  note: string | null // 备注
+  active: boolean // 状态：true=在用 / false=停用
+  created_at: string // 创建时间
+}
+
 // subcon_claims 表：QS 给分包商(subcon)出的每期进度款证书(cert/claim)
 //   一行 = 一张证书。subcon/claim_no 用来分组排序；完整内容在 cert(jsonb)。
 export interface SubconClaim {
