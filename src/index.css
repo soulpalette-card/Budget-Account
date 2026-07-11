@@ -25,6 +25,16 @@ body {
   body {
     background: #fff !important;
   }
+  /* 高度设成 auto，避免 min-h-screen / 100vh 撑出多余的一张空白（灰）纸 */
+  html,
+  body {
+    height: auto !important;
+  }
+  /* 列印时去掉外层页面的留白，让证书从纸张顶端开始，不外溢到第二页 */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
   /* 标了 no-print 的元素，打印时统统隐藏 */
   .no-print {
     display: none !important;

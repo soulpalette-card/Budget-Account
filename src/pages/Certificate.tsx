@@ -409,7 +409,7 @@ function CertDoc({
   const numColW = 'w-28'
 
   return (
-    <div className="min-h-screen bg-slate-200">
+    <div className="min-h-screen bg-slate-200 print:min-h-0 print:bg-white">
       {/* 工具条（不列印）*/}
       <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-2 bg-slate-800 px-4 py-2 text-white">
         <button onClick={onClose} className="text-sm">
