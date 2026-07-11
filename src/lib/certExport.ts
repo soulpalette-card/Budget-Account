@@ -9,7 +9,9 @@
 // ============================================================================
 
 import { jsPDF } from 'jspdf'
-import * as XLSX from 'xlsx'
+// 用 xlsx-js-style（SheetJS 的带样式分支）：支持合并格/边框/加粗/对齐，
+// 这样导出的 Excel 才能排成和证书一样的表格样子。
+import * as XLSX from 'xlsx-js-style'
 import type { AppendixRow, CertData } from '../types'
 import { company } from '../config'
 import { round2 } from './money'
@@ -363,80 +365,251 @@ export function exportCertExcel(data: CertExport): void {
   downloadBlob(blob, `CERT-${data.claimNoPad}-${safeName(data.cert.subContractor ?? '')}-${stamp()}.xlsx`)
 }
 
-// 组装证书工作簿（封面表 + 附录表），导出/测试共用
+// ---- Excel 样式小工具 ----
+const MONEY_FMT = '#,##0.00;-#,##0.00;"-"' // 正数千分位、负数带减号、0 显示 "-"（和证书一致）
+const thin = { style: 'thin', color: { rgb: 'FF000000' } }
+const box = { top: thin, bottom: thin, left: thin, right: thin }
+// 用 encode_cell 拿地址；给某格写值 + 样式
+function put(ws: XLSX.WorkSheet, r: number, col: number, v: string | number, s?: Record<string, unknown>) {
+  const addr = XLSX.utils.encode_cell({ r, c: col })
+  const t = typeof v === 'number' ? 'n' : 's'
+  ws[addr] = { v, t, ...(s ? { s } : {}) }
+}
+function mergeCells(ws: XLSX.WorkSheet, r1: number, c1: number, r2: number, c2: number) {
+  ;(ws['!merges'] ||= []).push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } })
+}
+
+// 组装证书工作簿（封面表 + 附录表），导出/测试共用。
+// 封面表排成和证书一样的样子（抬头/标题/信息块/计算表/签名格），附录表是明细表。
 export function buildCertWorkbook(data: CertExport): XLSX.WorkBook {
   const { cert: c, calc, claimNoPad } = data
   const rp = round2(c.retentionPct ?? 0)
   const wb = XLSX.utils.book_new()
 
-  // —— 封面表：字段 | 值 ——
-  const frontRows: (string | number)[][] = [
-    [company.name],
-    [company.regNo],
-    [`CERTIFICATE OF PAYMENT FOR SUB-CONTRACTOR CLAIM NO. ${claimNoPad}`],
-    [c.claimPeriod ?? ''],
-    [],
+  // ===================== 封面表 =====================
+  const ws: XLSX.WorkSheet = {}
+  const LAST = 7 // 用 8 列 A..H
+  const bold = { font: { bold: true } }
+  const money = { numFmt: MONEY_FMT, alignment: { horizontal: 'right' } }
+  const moneyB = { numFmt: MONEY_FMT, alignment: { horizontal: 'right' }, font: { bold: true } }
+  const rightWrap = { alignment: { horizontal: 'right', wrapText: true }, font: { sz: 8 } }
+  let r = 0
+
+  // 抬头
+  put(ws, r, 0, company.name, { font: { bold: true, sz: 14 } })
+  mergeCells(ws, r, 0, r, 3)
+  put(ws, r, 4, company.address, rightWrap)
+  mergeCells(ws, r, 4, r, LAST)
+  r++
+  put(ws, r, 0, company.regNo, { font: { sz: 9 } })
+  mergeCells(ws, r, 0, r, 3)
+  put(ws, r, 4, company.phone, { alignment: { horizontal: 'right' }, font: { sz: 8 } })
+  mergeCells(ws, r, 4, r, LAST)
+  r++
+  put(ws, r, 4, company.email, { alignment: { horizontal: 'right' }, font: { sz: 8 } })
+  mergeCells(ws, r, 4, r, LAST)
+  r++
+  // 粗黑线（用一行的下边框模拟）
+  for (let col = 0; col <= LAST; col++) put(ws, r, col, '', { border: { bottom: { style: 'medium', color: { rgb: 'FF000000' } } } })
+  r++
+  // 顶部期间
+  put(ws, r, 0, c.claimPeriod ?? '', { font: { sz: 8 } })
+  mergeCells(ws, r, 0, r, 3)
+  r++
+  // 标题
+  put(ws, r, 0, `CERTIFICATE OF PAYMENT FOR SUB-CONTRACTOR CLAIM NO. ${claimNoPad}`, {
+    font: { bold: true, sz: 12 },
+    alignment: { horizontal: 'center' },
+    border: { top: thin, bottom: thin },
+  })
+  for (let col = 1; col <= LAST; col++) put(ws, r, col, '', { border: { top: thin, bottom: thin } })
+  mergeCells(ws, r, 0, r, LAST)
+  r++
+
+  // 信息块 1
+  const info1: [string, string][] = [
     ['Ref of LA', c.refLA ?? ''],
     ['Sub-Contractor Ref', c.subconRef ?? ''],
     ['Date of Commencement', c.dateCommencement ?? ''],
     ['Date of Completion', c.dateCompletion ?? ''],
     ['Project Tile', c.projectTitle ?? ''],
+  ]
+  for (const [label, value] of info1) {
+    put(ws, r, 0, label, bold)
+    mergeCells(ws, r, 0, r, 1)
+    put(ws, r, 2, ':')
+    put(ws, r, 3, value, bold)
+    mergeCells(ws, r, 3, r, LAST)
+    r++
+  }
+  for (let col = 0; col <= LAST; col++) put(ws, r, col, '', { border: { bottom: thin } })
+  r++
+
+  // 信息块 2
+  const info2: [string, string | number][] = [
     ['Sub-Contractor', c.subContractor ?? ''],
     ['Trade', c.trade ?? ''],
     ['Contract Sum', c.contractSum ?? ''],
-    ['Limit of Retention (%)', rp],
+    ['Limit of Retention', `${rp}%`],
     ['Claim No', c.claimNo ?? ''],
     ['Period Ending', c.periodEnding ?? ''],
     ['Valuation Date', c.valuationDate ?? ''],
     ['Term of Payment', c.termOfPayment ?? ''],
-    [],
-    ['1  VALUE OF WORKDONE', n2(c.workdone ?? 0)],
-    ['2  ADDITION (Variation Order)', n2(c.vo ?? 0)],
-    ['3  Advance', n2(c.advance3 ?? 0)],
-    ['SUB TOTAL', n2(calc.subtotalA)],
-    [`4  DEDUCTION  Retention ${rp}%`, -n2(calc.retention)],
-    ['5  ADDITION  Advance', n2(c.addAdvance ?? 0)],
-    ['   ADDITION  KSK', n2(c.addKsk ?? 0)],
-    ['   ADDITION  Others', n2(c.addOthers ?? 0)],
-    ['SUB TOTAL', n2(calc.subtotalB)],
-    ['NETT AMOUNT', n2(calc.nett)],
-    ['6  DEDUCTION  Previous Amount Payment', -n2(c.dedPrevious ?? 0)],
-    ['   DEDUCTION  KSK', -n2(c.dedKsk ?? 0)],
-    ['   DEDUCTION  Backcharge', -n2(c.dedBackcharge ?? 0)],
-    ['TOTAL AMOUNT DUE TO / (OWE FROM) YOU', n2(calc.totalDue)],
-    [],
-    ['Prepared By', c.preparedBy ?? ''],
-    ['Verified by', c.verifiedBy ?? ''],
-    ['Checked by (Project Manager)', c.checkedBy ?? ''],
-    ['Approved by (Director)', c.approvedBy ?? ''],
   ]
-  const wsFront = XLSX.utils.aoa_to_sheet(frontRows)
-  wsFront['!cols'] = [{ wch: 40 }, { wch: 20 }]
-  XLSX.utils.book_append_sheet(wb, wsFront, 'Certificate')
+  for (const [label, value] of info2) {
+    put(ws, r, 0, label, bold)
+    mergeCells(ws, r, 0, r, 1)
+    put(ws, r, 2, ':')
+    put(ws, r, 3, value, bold)
+    mergeCells(ws, r, 3, r, LAST)
+    r++
+  }
+  for (let col = 0; col <= LAST; col++) put(ws, r, col, '', { border: { bottom: thin } })
+  r++
 
-  // —— 附录表：明细行 ——
+  // 计算表：A=编号 B..F=说明 G="RM" H=金额
+  const calcRow = (no: string, desc: string, amount: number | null, o: { bold?: boolean; topline?: boolean } = {}) => {
+    if (no) put(ws, r, 0, no, o.bold ? bold : undefined)
+    put(ws, r, 1, desc, o.bold ? bold : undefined)
+    mergeCells(ws, r, 1, r, 5)
+    if (amount !== null) {
+      put(ws, r, 6, 'RM', bold)
+      put(ws, r, 7, round2(amount), {
+        ...(o.bold ? moneyB : money),
+        ...(o.topline ? { border: { top: thin } } : {}),
+        numFmt: MONEY_FMT,
+      })
+    }
+    r++
+  }
+  const totalRow = (label: string, amount: number, o: { double?: boolean } = {}) => {
+    put(ws, r, 5, label, { font: { bold: true }, alignment: { horizontal: 'right' } })
+    put(ws, r, 6, 'RM', bold)
+    put(ws, r, 7, round2(amount), {
+      numFmt: MONEY_FMT,
+      alignment: { horizontal: 'right' },
+      font: { bold: true },
+      border: o.double ? { top: thin, bottom: { style: 'double', color: { rgb: 'FF000000' } } } : { top: thin },
+    })
+    r++
+  }
+
+  calcRow('1', 'VALUE OF WORKDONE', c.workdone ?? 0, { bold: true })
+  calcRow('2', 'ADDITION (Variation Order)', c.vo ?? 0)
+  calcRow('3', 'Advance', c.advance3 ?? 0)
+  totalRow('SUB TOTAL', calc.subtotalA)
+  calcRow('4', 'DEDUCTION', null)
+  calcRow('', `Retention Sum ${rp}%`, -calc.retention)
+  calcRow('5', 'ADDITION', null)
+  calcRow('', 'Advance', c.addAdvance ?? 0)
+  calcRow('', 'KSK', c.addKsk ?? 0)
+  calcRow('', 'Others', c.addOthers ?? 0)
+  totalRow('SUB TOTAL', calc.subtotalB)
+  totalRow('NETT AMOUNT :', calc.nett)
+  calcRow('6', 'DEDUCTION', null)
+  calcRow('', 'Previous Amount Payment', -(c.dedPrevious ?? 0))
+  calcRow('', 'KSK', -(c.dedKsk ?? 0))
+  calcRow('', 'Backcharge', -(c.dedBackcharge ?? 0))
+  put(ws, r, 1, 'TOTAL AMOUNT DUE TO / (OWE FROM) YOU', bold)
+  mergeCells(ws, r, 1, r, 4)
+  put(ws, r, 5, '', undefined)
+  put(ws, r, 6, 'RM', bold)
+  put(ws, r, 7, round2(calc.totalDue), {
+    numFmt: MONEY_FMT,
+    alignment: { horizontal: 'right' },
+    font: { bold: true },
+    border: { top: thin, bottom: { style: 'double', color: { rgb: 'FF000000' } } },
+  })
+  r += 2
+
+  // 签名格（2×2 + 右边一大格），用边框画格子
+  const sigTop = r
+  const sig = (rr: number, col: number, colEnd: number, line1: string, line2 = '') => {
+    put(ws, rr, col, line1, { font: { bold: true }, border: box, alignment: { vertical: 'bottom' } })
+    for (let cc = col + 1; cc <= colEnd; cc++) put(ws, rr, cc, '', { border: box })
+    mergeCells(ws, rr, col, rr + 1, colEnd)
+    if (line2) put(ws, rr + 2, col, line2)
+  }
+  // 左两列（A..C / D..E），两行
+  sig(sigTop, 0, 2, `Prepared By: ${c.preparedBy ?? ''}`)
+  sig(sigTop, 3, 4, `Verified by: ${c.verifiedBy ?? ''}`)
+  sig(sigTop + 2, 0, 2, `Checked by: ${c.checkedBy ?? ''}`, '(Project Manager)')
+  sig(sigTop + 2, 3, 4, `Approved by: ${c.approvedBy ?? ''}`, '(Director)')
+  // 右边一大格 F..H 跨 4 行
+  put(ws, sigTop, 5, 'I hereby, agreed and confirm with the amount stated in this certificate', {
+    font: { bold: true, sz: 9 },
+    alignment: { wrapText: true, vertical: 'top' },
+    border: box,
+  })
+  for (let cc = 6; cc <= LAST; cc++) put(ws, sigTop, cc, '', { border: box })
+  mergeCells(ws, sigTop, 5, sigTop + 3, LAST)
+  put(ws, sigTop + 4, 5, c.subContractor ?? '', bold)
+  put(ws, sigTop + 5, 5, '(Sub Contractor)')
+
+  ws['!cols'] = [{ wch: 6 }, { wch: 18 }, { wch: 3 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 5 }, { wch: 14 }]
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r + 8, c: LAST } })
+  XLSX.utils.book_append_sheet(wb, ws, 'Certificate')
+
+  // ===================== 附录表 =====================
+  const ax: XLSX.WorkSheet = {}
+  const AL = 6 // 7 列 A..G
+  let ar = 0
+  put(ax, ar, 0, company.name, { font: { bold: true, sz: 13 } })
+  mergeCells(ax, ar, 0, ar, AL)
+  ar++
+  put(ax, ar, 0, `APPENDIX — DETAIL OF WORKDONE (CLAIM NO. ${claimNoPad})`, {
+    font: { bold: true, sz: 12 },
+    alignment: { horizontal: 'center' },
+  })
+  mergeCells(ax, ar, 0, ar, AL)
+  ar++
+  put(ax, ar, 0, [c.subContractor, c.trade, c.projectTitle, c.periodEnding ? 'Period: ' + c.periodEnding : ''].filter(Boolean).join('  |  '), { font: { bold: true, sz: 9 } })
+  mergeCells(ax, ar, 0, ar, AL)
+  ar += 2
+  // 表头
+  const headStyle = { font: { bold: true }, border: { bottom: { style: 'medium', color: { rgb: 'FF000000' } } } }
+  put(ax, ar, 0, 'No', headStyle)
+  put(ax, ar, 1, 'Description', headStyle)
+  mergeCells(ax, ar, 1, ar, 2)
+  put(ax, ar, 3, 'Unit', { ...headStyle, alignment: { horizontal: 'center' } })
+  put(ax, ar, 4, 'Qty', { ...headStyle, alignment: { horizontal: 'right' } })
+  put(ax, ar, 5, 'Rate (RM)', { ...headStyle, alignment: { horizontal: 'right' } })
+  put(ax, ar, 6, 'Amount (RM)', { ...headStyle, alignment: { horizontal: 'right' } })
+  ar++
+
   const appx = c.appendix ?? []
-  const apxRows: (string | number)[][] = [['No', 'Section', 'Description', 'Unit', 'Qty', 'Rate (RM)', 'Amount (RM)']]
-  let wdSub = 0
-  let voSub = 0
-  appx
-    .filter((r) => r.section === 'workdone')
-    .forEach((r, i) => {
-      const amt = rowAmount(r)
-      wdSub += amt
-      apxRows.push([i + 1, 'WORKDONE', r.desc || '', r.unit || '', n2(r.qty || 0), n2(r.rate || 0), amt])
+  const drawSection = (title: string, section: 'workdone' | 'vo') => {
+    const rows = appx.filter((x) => x.section === section)
+    if (rows.length === 0) return 0
+    put(ax, ar, 0, title, { font: { bold: true } })
+    mergeCells(ax, ar, 0, ar, AL)
+    ar++
+    let sub = 0
+    rows.forEach((row, i) => {
+      const amt = rowAmount(row)
+      sub += amt
+      put(ax, ar, 0, i + 1)
+      put(ax, ar, 1, row.desc || '')
+      mergeCells(ax, ar, 1, ar, 2)
+      put(ax, ar, 3, row.unit || '', { alignment: { horizontal: 'center' } })
+      put(ax, ar, 4, n2(row.qty || 0), { alignment: { horizontal: 'right' } })
+      put(ax, ar, 5, n2(row.rate || 0), { numFmt: MONEY_FMT, alignment: { horizontal: 'right' } })
+      put(ax, ar, 6, amt, { numFmt: MONEY_FMT, alignment: { horizontal: 'right' } })
+      ar++
     })
-  if (wdSub > 0) apxRows.push(['', '', 'Subtotal WORKDONE (→ item 1)', '', '', '', n2(wdSub)])
-  appx
-    .filter((r) => r.section === 'vo')
-    .forEach((r, i) => {
-      const amt = rowAmount(r)
-      voSub += amt
-      apxRows.push([i + 1, 'VO', r.desc || '', r.unit || '', n2(r.qty || 0), n2(r.rate || 0), amt])
+    put(ax, ar, 1, `Subtotal ${section === 'workdone' ? '(-> front page item 1)' : '(-> front page item 2)'}`, {
+      font: { bold: true },
     })
-  if (voSub > 0) apxRows.push(['', '', 'Subtotal VO (→ item 2)', '', '', '', n2(voSub)])
-  const wsApx = XLSX.utils.aoa_to_sheet(apxRows)
-  wsApx['!cols'] = [{ wch: 5 }, { wch: 10 }, { wch: 44 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 14 }]
-  XLSX.utils.book_append_sheet(wb, wsApx, 'Appendix')
+    mergeCells(ax, ar, 1, ar, 5)
+    put(ax, ar, 6, round2(sub), { numFmt: MONEY_FMT, alignment: { horizontal: 'right' }, font: { bold: true }, border: { top: thin } })
+    ar += 2
+    return round2(sub)
+  }
+  drawSection('A. VALUE OF WORKDONE', 'workdone')
+  drawSection('B. VARIATION ORDER', 'vo')
+
+  ax['!cols'] = [{ wch: 5 }, { wch: 30 }, { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 14 }]
+  ax['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: ar + 1, c: AL } })
+  XLSX.utils.book_append_sheet(wb, ax, 'Appendix')
   return wb
 }

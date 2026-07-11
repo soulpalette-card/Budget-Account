@@ -114,7 +114,19 @@ export function Certificate() {
     const nextNo = existing.length ? Math.max(...existing.map((c) => c.claim_no)) + 1 : 1
     // 之前各期已付合计（第 2 期起自动带进「已付款」扣项）
     const prevPaid = round2(existing.reduce((sum, c) => sum + (c.gross_amount || 0), 0))
-    setPrefill(certFromSubcon(sub, nextNo, nextNo > 1 ? prevPaid : 0))
+    const p = certFromSubcon(sub, nextNo, nextNo > 1 ? prevPaid : 0)
+    // 继承上一期的附录明细：工程量是累计的，第 2 期在上一期基础上改数量/加新项即可。
+    // 封面「工程量/变更单」也按继承来的附录小计预填，保持一致（改数量后点「带入封面」再更新）。
+    const latest = existing.slice().sort((a, b) => a.claim_no - b.claim_no).pop()
+    const prevAppx = latest?.cert?.appendix
+    if (prevAppx && prevAppx.length > 0) {
+      p.appendix = prevAppx.map((row) => ({ ...row }))
+      p.workdone = round2(
+        prevAppx.filter((row) => row.section === 'workdone').reduce((s, row) => s + row.qty * row.rate, 0),
+      )
+      p.vo = round2(prevAppx.filter((row) => row.section === 'vo').reduce((s, row) => s + row.qty * row.rate, 0))
+    }
+    setPrefill(p)
     setPicking(false)
     setOpenDoc('new')
   }
