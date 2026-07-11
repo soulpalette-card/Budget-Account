@@ -440,6 +440,7 @@ export async function saveSubcon(input: {
         element: (s.element ?? '').trim(),
         rate: round2(s.rate ?? 0),
         unit: (s.unit ?? '').trim(),
+        category: s.category || undefined,
       }))
       .filter((s) => s.element !== '' || s.rate !== 0 || s.unit !== '')
     scopes = cleaned.length > 0 ? cleaned : null

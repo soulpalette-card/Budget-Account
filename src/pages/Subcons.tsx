@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import * as store from '../lib/store'
 import type { ScopeLine, Subcon } from '../types'
+import { certScopes } from '../config'
 import { parseAmount, round2 } from '../lib/money'
 import { friendlyError } from '../lib/errors'
 import { useI18n } from '../lib/i18n'
@@ -163,11 +164,11 @@ function SubconForm({
   })
   const [entityType, setEntityType] = useState<'company' | 'individual'>(s?.entity_type ?? 'individual')
   const [active, setActive] = useState<boolean>(s?.active ?? true)
-  // 工种价位表（每行：工种 + 价位字符串 + 单位）
-  const [scopes, setScopes] = useState<{ element: string; rate: string; unit: string }[]>(
+  // 工种价位表（每行：工种 + 价位字符串 + 单位 + 对应证书附录分类）
+  const [scopes, setScopes] = useState<{ element: string; rate: string; unit: string; category: string }[]>(
     s?.scopes && s.scopes.length > 0
-      ? s.scopes.map((x) => ({ element: x.element, rate: fmtRate(x.rate), unit: x.unit }))
-      : [{ element: '', rate: '', unit: '' }],
+      ? s.scopes.map((x) => ({ element: x.element, rate: fmtRate(x.rate), unit: x.unit, category: x.category ?? '' }))
+      : [{ element: '', rate: '', unit: '', category: '' }],
   )
   const [busy, setBusy] = useState(false)
   // 本地错误：保存失败时就地显示（否则会被列表页盖住看不到）
@@ -178,11 +179,25 @@ function SubconForm({
   }
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
 
-  function setScope(i: number, key: 'element' | 'rate' | 'unit', v: string) {
-    setScopes((p) => p.map((row, idx) => (idx === i ? { ...row, [key]: v } : row)))
+  function setScope(i: number, key: 'element' | 'rate' | 'unit' | 'category', v: string) {
+    setScopes((p) =>
+      p.map((row, idx) => {
+        if (idx !== i) return row
+        const next = { ...row, [key]: v }
+        // 选了分类又还没填工种/单位时，自动带出分类的名字和默认单位，省得再打
+        if (key === 'category' && v) {
+          const sc = certScopes.find((c) => c.key === v)
+          if (sc) {
+            if (!next.element.trim()) next.element = sc.label
+            if (!next.unit.trim()) next.unit = sc.unit
+          }
+        }
+        return next
+      }),
+    )
   }
   function addScope() {
-    setScopes((p) => [...p, { element: '', rate: '', unit: '' }])
+    setScopes((p) => [...p, { element: '', rate: '', unit: '', category: '' }])
   }
   function removeScope(i: number) {
     setScopes((p) => (p.length <= 1 ? p : p.filter((_, idx) => idx !== i)))
@@ -200,6 +215,7 @@ function SubconForm({
         element: row.element.trim(),
         rate: parseAmount(row.rate),
         unit: row.unit.trim(),
+        category: row.category || undefined,
       }))
       await store.saveSubcon({
         id: subcon?.id,
@@ -336,34 +352,50 @@ function SubconForm({
           </span>
           <div className="mt-1 space-y-2">
             {scopes.map((row, i) => (
-              <div key={i} className="flex items-center gap-1.5">
-                <input
-                  value={row.element}
-                  onChange={(e) => setScope(i, 'element', e.target.value)}
-                  placeholder={t('工种，如 BARBENDER', 'Trade, e.g. BARBENDER')}
-                  className="min-w-0 flex-[2] rounded-lg border border-slate-200 px-2.5 py-2 text-sm focus:border-amber-400 focus:outline-none"
-                />
-                <input
-                  value={row.rate}
-                  inputMode="decimal"
-                  onChange={(e) => setScope(i, 'rate', e.target.value)}
-                  onBlur={() => setScope(i, 'rate', fmtRate(parseAmount(row.rate)))}
-                  placeholder={t('价位', 'Rate')}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-2 text-right text-sm focus:border-amber-400 focus:outline-none"
-                />
-                <input
-                  value={row.unit}
-                  onChange={(e) => setScope(i, 'unit', e.target.value)}
-                  placeholder={t('单位', 'Unit')}
-                  className="w-16 min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-sm focus:border-amber-400 focus:outline-none"
-                />
-                <button
-                  onClick={() => removeScope(i)}
-                  className="shrink-0 px-1.5 text-slate-300 hover:text-red-500"
-                  title={t('删除这行', 'Remove')}
+              <div key={i} className="space-y-1 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={row.element}
+                    onChange={(e) => setScope(i, 'element', e.target.value)}
+                    placeholder={t('工种，如 BARBENDER', 'Trade, e.g. BARBENDER')}
+                    className="min-w-0 flex-[2] rounded-lg border border-slate-200 px-2.5 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                  />
+                  <input
+                    value={row.rate}
+                    inputMode="decimal"
+                    onChange={(e) => setScope(i, 'rate', e.target.value)}
+                    onBlur={() => setScope(i, 'rate', fmtRate(parseAmount(row.rate)))}
+                    placeholder={t('价位', 'Rate')}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2.5 py-2 text-right text-sm focus:border-amber-400 focus:outline-none"
+                  />
+                  <input
+                    value={row.unit}
+                    onChange={(e) => setScope(i, 'unit', e.target.value)}
+                    placeholder={t('单位', 'Unit')}
+                    className="w-16 min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => removeScope(i)}
+                    className="shrink-0 px-1.5 text-slate-300 hover:text-red-500"
+                    title={t('删除这行', 'Remove')}
+                  >
+                    ✕
+                  </button>
+                </div>
+                {/* 对应证书附录分类：填了，做证书时这个价位会自动带进对应的框 */}
+                <select
+                  value={row.category}
+                  onChange={(e) => setScope(i, 'category', e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 focus:border-amber-400 focus:outline-none"
                 >
-                  ✕
-                </button>
+                  <option value="">{t('（不绑定证书分类）', '(not linked to a cert category)')}</option>
+                  {certScopes.map((sc) => (
+                    <option key={sc.key} value={sc.key}>
+                      {t('证书分类：', 'Cert category: ')}
+                      {sc.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             ))}
           </div>
@@ -374,7 +406,10 @@ function SubconForm({
             {t('＋ 加一个工种', '＋ Add trade')}
           </button>
           <div className="mt-1 text-[10px] text-slate-400">
-            {t('单位可填 /吨、/m²、/天、lump sum 等；不确定可留空。', 'Unit e.g. /tonne, /m², /day, lump sum; optional.')}
+            {t(
+              '选「证书分类」后，做证书时这个价位会自动带进附录对应的框（如 Rebar）。单位可填 /吨、/m²、/天 等。',
+              'Pick a cert category so this rate auto-fills the matching appendix frame (e.g. Rebar) when you make a certificate.',
+            )}
           </div>
         </div>
 

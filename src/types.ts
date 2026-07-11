@@ -136,6 +136,7 @@ export interface ScopeLine {
   element: string // 负责的元素/工种，例如 BARBENDER、CARPENTER
   rate: number // 价位（数字）
   unit: string // 单位，例如 "/吨" "/m²" "/天" "lump sum"，可留空
+  category?: string // 对应证书附录的分类框(rebar/formwork/…)，填了做证书时会自动带出这个价位
 }
 
 // subcons 表：分包商主档。一行 = 一个 subcon 的基本资料。

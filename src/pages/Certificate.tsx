@@ -162,12 +162,24 @@ export function Certificate() {
     return Array.from(map.entries()).map(([subcon, list]) => ({ subcon, list }))
   }, [certs])
 
+  // 从分包商主档拿「分类 → 价位/单位」对照（做证书时自动带出价位）
+  function rateMapFor(name: string): Record<string, { rate: number; unit: string }> {
+    const sub = subcons.find((s) => s.name === name)
+    const m: Record<string, { rate: number; unit: string }> = {}
+    for (const sc of sub?.scopes ?? []) {
+      if (sc.category) m[sc.category] = { rate: sc.rate, unit: sc.unit }
+    }
+    return m
+  }
+
   // ---- 打开某张证书：整屏显示 A4 文档 ----
   if (openDoc) {
+    const subName = openDoc === 'new' ? prefill?.subContractor ?? '' : openDoc.subcon
     return (
       <CertDoc
         claim={openDoc === 'new' ? null : openDoc}
         prefill={openDoc === 'new' ? prefill : null}
+        rateMap={rateMapFor(subName)}
         onClose={() => setOpenDoc(null)}
         onSaved={() => {
           setOpenDoc(null)
@@ -313,12 +325,14 @@ export function Certificate() {
 function CertDoc({
   claim,
   prefill,
+  rateMap,
   onClose,
   onSaved,
   onError,
 }: {
   claim: SubconClaim | null
   prefill: CertData | null
+  rateMap: Record<string, { rate: number; unit: string }>
   onClose: () => void
   onSaved: () => void
   onError: (msg: string) => void
@@ -388,7 +402,15 @@ function CertDoc({
     }))
     for (const sc of certScopes) {
       if (!rows.some((r) => r.category === sc.key)) {
-        rows.push({ category: sc.key, desc: '', unit: sc.unit, qty: '', rate: '' })
+        // 从分包商主档带出这个分类的默认价位/单位（做证书时自动填价格）
+        const rm = rateMap[sc.key]
+        rows.push({
+          category: sc.key,
+          desc: '',
+          unit: rm?.unit || sc.unit,
+          qty: '',
+          rate: rm && rm.rate ? fmtInput(rm.rate) : '',
+        })
       }
     }
     return rows
@@ -396,8 +418,19 @@ function CertDoc({
   const [appx, setAppx] = useState<AppxDraft[]>(initAppx)
   const setRow = (i: number, key: keyof AppxDraft, v: string) =>
     setAppx((p) => p.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)))
-  const addRow = (category: string) =>
-    setAppx((p) => [...p, { category, desc: '', unit: catUnit(category), qty: '', rate: '' }])
+  const addRow = (category: string) => {
+    const rm = rateMap[category]
+    setAppx((p) => [
+      ...p,
+      {
+        category,
+        desc: '',
+        unit: rm?.unit || catUnit(category),
+        qty: '',
+        rate: rm && rm.rate ? fmtInput(rm.rate) : '',
+      },
+    ])
+  }
   const removeRow = (i: number) => setAppx((p) => p.filter((_, idx) => idx !== i))
   const rowAmt = (r: AppxDraft) => round2(parseAmount(r.qty) * parseAmount(r.rate))
   // 封面两项小计：所有 workdone 类之和 / 所有 vo 类之和
@@ -563,13 +596,26 @@ function CertDoc({
     }
   }
 
+  // 字段锁定：打开已保存的证书默认「锁定」，防止误改；点某一格才解锁那一格。
+  //   新建证书默认「解锁」方便直接填。工具条可一键全锁 / 全解。
+  const [locked, setLocked] = useState<boolean>(!!claim)
+  const [unlocked, setUnlocked] = useState<Set<string>>(new Set())
+  const isOpen = (k: string) => !locked || unlocked.has(k)
+  const openField = (k: string) => setUnlocked((s) => new Set(s).add(k))
+  // 锁定态下的样式：灰底 + 手型（提示可点解锁）；列印时不显示灰底
+  const lockCls = (k: string) =>
+    isOpen(k) ? 'focus:bg-amber-50' : 'cursor-pointer rounded bg-slate-200/60 print:bg-transparent'
+  const lockAttr = (k: string): { readOnly?: boolean; onClick?: () => void; title?: string } =>
+    isOpen(k) ? {} : { readOnly: true, onClick: () => openField(k), title: t('点一下解锁这格再改', 'Click to unlock this field') }
+
   // 注意：下面用「函数调用」返回 <input>，不要写成 <T/> 组件，
   // 否则每次输入都会重建组件导致输入框失焦。
   const txt = (k: string, cls = '') => (
     <input
       value={f[k]}
       onChange={(e) => set(k, e.target.value)}
-      className={'bg-transparent focus:bg-amber-50 focus:outline-none ' + cls}
+      {...lockAttr(k)}
+      className={'bg-transparent focus:outline-none ' + lockCls(k) + ' ' + cls}
     />
   )
   const amt = (k: string) => (
@@ -579,7 +625,8 @@ function CertDoc({
       placeholder="-"
       onChange={(e) => set(k, e.target.value)}
       onBlur={() => set(k, fmtInput(parseAmount(f[k])))}
-      className="w-full bg-transparent text-right placeholder:text-black focus:bg-amber-50 focus:outline-none"
+      {...lockAttr(k)}
+      className={'w-full bg-transparent text-right placeholder:text-black focus:outline-none ' + lockCls(k)}
     />
   )
   const numColW = 'w-28'
@@ -592,6 +639,22 @@ function CertDoc({
           ← {t('返回', 'Back')}
         </button>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              if (locked) setLocked(false)
+              else {
+                setLocked(true)
+                setUnlocked(new Set())
+              }
+            }}
+            className={
+              'rounded px-3 py-1.5 text-sm font-semibold ' +
+              (locked ? 'bg-slate-600 hover:bg-slate-500' : 'bg-yellow-500 text-slate-900 hover:bg-yellow-400')
+            }
+            title={t('锁定后点某一格可单独解锁', 'When locked, click a field to unlock just that one')}
+          >
+            {locked ? '🔓 ' + t('解锁全部', 'Unlock all') : '🔒 ' + t('锁定', 'Lock')}
+          </button>
           {claim && (
             <button onClick={remove} className="rounded bg-slate-600 px-3 py-1.5 text-sm hover:bg-red-600">
               {t('删除', 'Delete')}
@@ -739,7 +802,8 @@ function CertDoc({
                 onBlur={() => {
                   if (f.retentionAmt.trim() !== '') set('retentionAmt', fmtInput(parseAmount(f.retentionAmt)))
                 }}
-                className="w-full bg-transparent text-right placeholder:text-black focus:bg-amber-50 focus:outline-none"
+                {...lockAttr('retentionAmt')}
+                className={'w-full bg-transparent text-right placeholder:text-black focus:outline-none ' + lockCls('retentionAmt')}
               />
             </span>
           </div>
@@ -899,20 +963,23 @@ function CertDoc({
                     value={x.r.desc}
                     onChange={(e) => setRow(x.i, 'desc', e.target.value)}
                     placeholder={t('地点/说明（可空）', 'Location/desc (optional)')}
-                    className="flex-1 bg-transparent px-1 focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`ap-desc-${x.i}`)}
+                    className={'flex-1 bg-transparent px-1 focus:outline-none ' + lockCls(`ap-desc-${x.i}`)}
                   />
                   <input
                     value={x.r.unit}
                     onChange={(e) => setRow(x.i, 'unit', e.target.value)}
                     placeholder={t('单位', 'Unit')}
-                    className="w-14 bg-transparent px-1 focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`ap-unit-${x.i}`)}
+                    className={'w-14 bg-transparent px-1 focus:outline-none ' + lockCls(`ap-unit-${x.i}`)}
                   />
                   <input
                     value={x.r.qty}
                     inputMode="decimal"
                     onChange={(e) => setRow(x.i, 'qty', e.target.value)}
                     placeholder="0"
-                    className="w-16 bg-transparent px-1 text-right focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`ap-qty-${x.i}`)}
+                    className={'w-16 bg-transparent px-1 text-right focus:outline-none ' + lockCls(`ap-qty-${x.i}`)}
                   />
                   <input
                     value={x.r.rate}
@@ -920,24 +987,29 @@ function CertDoc({
                     onChange={(e) => setRow(x.i, 'rate', e.target.value)}
                     onBlur={() => setRow(x.i, 'rate', fmtInput(parseAmount(x.r.rate)))}
                     placeholder="0"
-                    className="w-24 bg-transparent px-1 text-right focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`ap-rate-${x.i}`)}
+                    className={'w-24 bg-transparent px-1 text-right focus:outline-none ' + lockCls(`ap-rate-${x.i}`)}
                   />
                   <span className="w-28 px-1 text-right">{fmtAmt(rowAmt(x.r))}</span>
-                  <button
-                    onClick={() => removeRow(x.i)}
-                    className="no-print w-6 text-slate-300 hover:text-red-500"
-                    title={t('删除这行', 'Remove')}
-                  >
-                    ✕
-                  </button>
+                  {!locked && (
+                    <button
+                      onClick={() => removeRow(x.i)}
+                      className="no-print w-6 text-slate-300 hover:text-red-500"
+                      title={t('删除这行', 'Remove')}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               ))}
-              <button
-                onClick={() => addRow(category)}
-                className="no-print mt-0.5 text-[11px] font-medium text-amber-600 hover:underline"
-              >
-                {t('＋ 加一行（分地点）', '＋ Add row (by location)')}
-              </button>
+              {!locked && (
+                <button
+                  onClick={() => addRow(category)}
+                  className="no-print mt-0.5 text-[11px] font-medium text-amber-600 hover:underline"
+                >
+                  {t('＋ 加一行（分地点）', '＋ Add row (by location)')}
+                </button>
+              )}
             </div>
           )
         })}
@@ -970,15 +1042,17 @@ function CertDoc({
               {t('封面填的', 'Front page')}：{t('工程量', 'Workdone')} RM {fmtAmt(num('workdone'))} · VO RM{' '}
               {fmtAmt(num('vo'))}
             </div>
-            <button
-              onClick={() => {
-                set('workdone', fmtInput(wdSub))
-                set('vo', fmtInput(voSub))
-              }}
-              className="rounded-md bg-slate-800 px-3 py-1.5 font-semibold text-white hover:bg-slate-700"
-            >
-              {t('把小计带入封面', 'Sync to front page')}
-            </button>
+            {!locked && (
+              <button
+                onClick={() => {
+                  set('workdone', fmtInput(wdSub))
+                  set('vo', fmtInput(voSub))
+                }}
+                className="rounded-md bg-slate-800 px-3 py-1.5 font-semibold text-white hover:bg-slate-700"
+              >
+                {t('把小计带入封面', 'Sync to front page')}
+              </button>
+            )}
           </div>
           {hasAppx && (round2(num('workdone')) !== wdSub || round2(num('vo')) !== voSub) && (
             <div className="mt-1 font-semibold text-amber-700">
@@ -1000,7 +1074,8 @@ function CertDoc({
           value={pmtHeader}
           onChange={(e) => setPmtHeader(e.target.value)}
           placeholder={t('项目全名（可空）', 'Project full name (optional)')}
-          className="w-full bg-transparent text-[12px] font-bold focus:bg-amber-50 focus:outline-none"
+          {...lockAttr('pmtHeader')}
+          className={'w-full bg-transparent text-[12px] font-bold focus:outline-none ' + lockCls('pmtHeader')}
         />
 
         <div className="mt-4 flex items-start justify-between">
@@ -1032,7 +1107,8 @@ function CertDoc({
                     value={r.date}
                     onChange={(e) => setPmtRow(i, 'date', e.target.value)}
                     placeholder={t('日期', 'Date')}
-                    className="w-full bg-transparent text-center focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`pm-date-${i}`)}
+                    className={'w-full bg-transparent text-center focus:outline-none ' + lockCls(`pm-date-${i}`)}
                   />
                 </td>
                 <td className="border border-black px-1 text-center">
@@ -1040,7 +1116,8 @@ function CertDoc({
                     value={r.cert}
                     onChange={(e) => setPmtRow(i, 'cert', e.target.value)}
                     placeholder="ADVANCE"
-                    className="w-full bg-transparent text-center focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`pm-cert-${i}`)}
+                    className={'w-full bg-transparent text-center focus:outline-none ' + lockCls(`pm-cert-${i}`)}
                   />
                 </td>
                 <td className="border border-black px-1 text-right">
@@ -1050,21 +1127,25 @@ function CertDoc({
                     onChange={(e) => setPmtRow(i, 'amount', e.target.value)}
                     onBlur={() => setPmtRow(i, 'amount', fmtInput(parseAmount(r.amount)))}
                     placeholder="0"
-                    className="w-full bg-transparent text-right focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`pm-amt-${i}`)}
+                    className={'w-full bg-transparent text-right focus:outline-none ' + lockCls(`pm-amt-${i}`)}
                   />
                 </td>
                 <td className="border border-black px-1">
                   <input
                     value={r.desc}
                     onChange={(e) => setPmtRow(i, 'desc', e.target.value)}
-                    className="w-full bg-transparent focus:bg-amber-50 focus:outline-none"
+                    {...lockAttr(`pm-desc-${i}`)}
+                    className={'w-full bg-transparent focus:outline-none ' + lockCls(`pm-desc-${i}`)}
                   />
                 </td>
-                <td className="no-print border-0 text-center">
-                  <button onClick={() => removePmtRow(i)} className="text-slate-300 hover:text-red-500" title={t('删除', 'Remove')}>
-                    ✕
-                  </button>
-                </td>
+                {!locked && (
+                  <td className="no-print border-0 text-center">
+                    <button onClick={() => removePmtRow(i)} className="text-slate-300 hover:text-red-500" title={t('删除', 'Remove')}>
+                      ✕
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             <tr className="font-bold">
@@ -1077,12 +1158,14 @@ function CertDoc({
             </tr>
           </tbody>
         </table>
-        <button
-          onClick={addPmtRow}
-          className="no-print mt-1 text-[11px] font-medium text-amber-600 hover:underline"
-        >
-          {t('＋ 加一笔付款', '＋ Add payment')}
-        </button>
+        {!locked && (
+          <button
+            onClick={addPmtRow}
+            className="no-print mt-1 text-[11px] font-medium text-amber-600 hover:underline"
+          >
+            {t('＋ 加一笔付款', '＋ Add payment')}
+          </button>
+        )}
       </div>
     </div>
   )
