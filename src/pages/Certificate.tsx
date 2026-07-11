@@ -602,24 +602,34 @@ function CertDoc({
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set())
   const isOpen = (k: string) => !locked || unlocked.has(k)
   const openField = (k: string) => setUnlocked((s) => new Set(s).add(k))
+  const relock = (k: string) =>
+    setUnlocked((s) => {
+      const n = new Set(s)
+      n.delete(k)
+      return n
+    })
   // 内联输入用：锁着时禁用（配合后面挂的 lockBtn 解锁）
   const lockAttr = (k: string) => ({ disabled: !isOpen(k) })
   // 锁定态下的样式：灰底（提示锁着）；列印时恢复正常，值照印
   const lockCls = (k: string) =>
     isOpen(k) ? 'focus:bg-amber-50' : 'bg-slate-200/50 text-slate-500 print:bg-transparent print:text-black'
-  // 每一格的 🔒 小按钮（只在锁着时显示；列印不显示）
-  const lockBtn = (k: string) =>
-    isOpen(k) ? null : (
+  // 每一格的锁开关（只在「锁定模式」下显示；列印不显示）
+  //   还锁着 → 🔒（点它解锁这格）；已解锁 → 🔓（点它锁回去）
+  const lockBtn = (k: string) => {
+    if (!locked) return null
+    const open = unlocked.has(k)
+    return (
       <button
         type="button"
         tabIndex={-1}
-        onClick={() => openField(k)}
+        onClick={() => (open ? relock(k) : openField(k))}
         className="no-print ml-0.5 shrink-0 text-[9px] leading-none text-slate-400 hover:text-amber-600"
-        title={t('点一下解锁这格', 'Click to unlock this field')}
+        title={open ? t('点一下锁回去', 'Click to lock') : t('点一下解锁这格', 'Click to unlock')}
       >
-        🔒
+        {open ? '🔓' : '🔒'}
       </button>
     )
+  }
 
   // 注意：下面用「函数调用」返回 <input>，不要写成 <T/> 组件，
   // 否则每次输入都会重建组件导致输入框失焦。
@@ -633,7 +643,7 @@ function CertDoc({
         className={'min-w-0 bg-transparent focus:outline-none ' + lockCls(k) + ' ' + cls}
       />
     )
-    return isOpen(k) ? input : (
+    return !locked ? input : (
       <span className={'inline-flex items-center ' + cls}>
         {input}
         {lockBtn(k)}
@@ -652,7 +662,7 @@ function CertDoc({
         className={'min-w-0 w-full bg-transparent text-right placeholder:text-black focus:outline-none ' + lockCls(k)}
       />
     )
-    return isOpen(k) ? input : (
+    return !locked ? input : (
       <span className="inline-flex w-full items-center justify-end">
         {input}
         {lockBtn(k)}
