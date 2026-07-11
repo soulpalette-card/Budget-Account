@@ -596,39 +596,69 @@ function CertDoc({
     }
   }
 
-  // 字段锁定：打开已保存的证书默认「锁定」，防止误改；点某一格才解锁那一格。
+  // 字段锁定：打开已保存的证书默认「锁定」，防止误改；每一格自带 🔒 按钮，点它才解锁那一格。
   //   新建证书默认「解锁」方便直接填。工具条可一键全锁 / 全解。
   const [locked, setLocked] = useState<boolean>(!!claim)
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set())
   const isOpen = (k: string) => !locked || unlocked.has(k)
   const openField = (k: string) => setUnlocked((s) => new Set(s).add(k))
-  // 锁定态下的样式：灰底 + 手型（提示可点解锁）；列印时不显示灰底
+  // 内联输入用：锁着时禁用（配合后面挂的 lockBtn 解锁）
+  const lockAttr = (k: string) => ({ disabled: !isOpen(k) })
+  // 锁定态下的样式：灰底（提示锁着）；列印时恢复正常，值照印
   const lockCls = (k: string) =>
-    isOpen(k) ? 'focus:bg-amber-50' : 'cursor-pointer rounded bg-slate-200/60 print:bg-transparent'
-  const lockAttr = (k: string): { readOnly?: boolean; onClick?: () => void; title?: string } =>
-    isOpen(k) ? {} : { readOnly: true, onClick: () => openField(k), title: t('点一下解锁这格再改', 'Click to unlock this field') }
+    isOpen(k) ? 'focus:bg-amber-50' : 'bg-slate-200/50 text-slate-500 print:bg-transparent print:text-black'
+  // 每一格的 🔒 小按钮（只在锁着时显示；列印不显示）
+  const lockBtn = (k: string) =>
+    isOpen(k) ? null : (
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => openField(k)}
+        className="no-print ml-0.5 shrink-0 text-[9px] leading-none text-slate-400 hover:text-amber-600"
+        title={t('点一下解锁这格', 'Click to unlock this field')}
+      >
+        🔒
+      </button>
+    )
 
   // 注意：下面用「函数调用」返回 <input>，不要写成 <T/> 组件，
   // 否则每次输入都会重建组件导致输入框失焦。
-  const txt = (k: string, cls = '') => (
-    <input
-      value={f[k]}
-      onChange={(e) => set(k, e.target.value)}
-      {...lockAttr(k)}
-      className={'bg-transparent focus:outline-none ' + lockCls(k) + ' ' + cls}
-    />
-  )
-  const amt = (k: string) => (
-    <input
-      value={f[k]}
-      inputMode="decimal"
-      placeholder="-"
-      onChange={(e) => set(k, e.target.value)}
-      onBlur={() => set(k, fmtInput(parseAmount(f[k])))}
-      {...lockAttr(k)}
-      className={'w-full bg-transparent text-right placeholder:text-black focus:outline-none ' + lockCls(k)}
-    />
-  )
+  // 锁着时：input 禁用 + 右边挂一个 🔒 按钮（用 inline-flex 包起来）；解锁/新建时：只是普通 input（不改版式）。
+  const txt = (k: string, cls = '') => {
+    const input = (
+      <input
+        value={f[k]}
+        onChange={(e) => set(k, e.target.value)}
+        disabled={!isOpen(k)}
+        className={'min-w-0 bg-transparent focus:outline-none ' + lockCls(k) + ' ' + cls}
+      />
+    )
+    return isOpen(k) ? input : (
+      <span className={'inline-flex items-center ' + cls}>
+        {input}
+        {lockBtn(k)}
+      </span>
+    )
+  }
+  const amt = (k: string) => {
+    const input = (
+      <input
+        value={f[k]}
+        inputMode="decimal"
+        placeholder="-"
+        onChange={(e) => set(k, e.target.value)}
+        onBlur={() => set(k, fmtInput(parseAmount(f[k])))}
+        disabled={!isOpen(k)}
+        className={'min-w-0 w-full bg-transparent text-right placeholder:text-black focus:outline-none ' + lockCls(k)}
+      />
+    )
+    return isOpen(k) ? input : (
+      <span className="inline-flex w-full items-center justify-end">
+        {input}
+        {lockBtn(k)}
+      </span>
+    )
+  }
   const numColW = 'w-28'
 
   return (
@@ -793,7 +823,7 @@ function CertDoc({
             <span className="flex-1 font-bold">Retention Sum {parseAmount(f.retentionPct)}%</span>
             <span className="mr-2 font-bold">RM</span>
             {/* 保留金：默认自动按百分比算；想手填（如预支不计保留金）直接改这格即可 */}
-            <span className={numColW + ' text-right font-bold'}>
+            <span className={numColW + ' inline-flex items-center justify-end text-right font-bold'}>
               <input
                 value={f.retentionAmt !== '' ? f.retentionAmt : autoRetention === 0 ? '' : fmtInput(autoRetention)}
                 inputMode="decimal"
@@ -805,6 +835,7 @@ function CertDoc({
                 {...lockAttr('retentionAmt')}
                 className={'w-full bg-transparent text-right placeholder:text-black focus:outline-none ' + lockCls('retentionAmt')}
               />
+              {lockBtn('retentionAmt')}
             </span>
           </div>
 
@@ -963,23 +994,23 @@ function CertDoc({
                     value={x.r.desc}
                     onChange={(e) => setRow(x.i, 'desc', e.target.value)}
                     placeholder={t('地点/说明（可空）', 'Location/desc (optional)')}
-                    {...lockAttr(`ap-desc-${x.i}`)}
-                    className={'flex-1 bg-transparent px-1 focus:outline-none ' + lockCls(`ap-desc-${x.i}`)}
+                    {...lockAttr(`ap-${x.i}`)}
+                    className={'flex-1 bg-transparent px-1 focus:outline-none ' + lockCls(`ap-${x.i}`)}
                   />
                   <input
                     value={x.r.unit}
                     onChange={(e) => setRow(x.i, 'unit', e.target.value)}
                     placeholder={t('单位', 'Unit')}
-                    {...lockAttr(`ap-unit-${x.i}`)}
-                    className={'w-14 bg-transparent px-1 focus:outline-none ' + lockCls(`ap-unit-${x.i}`)}
+                    {...lockAttr(`ap-${x.i}`)}
+                    className={'w-14 bg-transparent px-1 focus:outline-none ' + lockCls(`ap-${x.i}`)}
                   />
                   <input
                     value={x.r.qty}
                     inputMode="decimal"
                     onChange={(e) => setRow(x.i, 'qty', e.target.value)}
                     placeholder="0"
-                    {...lockAttr(`ap-qty-${x.i}`)}
-                    className={'w-16 bg-transparent px-1 text-right focus:outline-none ' + lockCls(`ap-qty-${x.i}`)}
+                    {...lockAttr(`ap-${x.i}`)}
+                    className={'w-16 bg-transparent px-1 text-right focus:outline-none ' + lockCls(`ap-${x.i}`)}
                   />
                   <input
                     value={x.r.rate}
@@ -987,10 +1018,13 @@ function CertDoc({
                     onChange={(e) => setRow(x.i, 'rate', e.target.value)}
                     onBlur={() => setRow(x.i, 'rate', fmtInput(parseAmount(x.r.rate)))}
                     placeholder="0"
-                    {...lockAttr(`ap-rate-${x.i}`)}
-                    className={'w-24 bg-transparent px-1 text-right focus:outline-none ' + lockCls(`ap-rate-${x.i}`)}
+                    {...lockAttr(`ap-${x.i}`)}
+                    className={'w-24 bg-transparent px-1 text-right focus:outline-none ' + lockCls(`ap-${x.i}`)}
                   />
-                  <span className="w-28 px-1 text-right">{fmtAmt(rowAmt(x.r))}</span>
+                  <span className="inline-flex w-28 items-center justify-end px-1 text-right">
+                    {fmtAmt(rowAmt(x.r))}
+                    {lockBtn(`ap-${x.i}`)}
+                  </span>
                   {!locked && (
                     <button
                       onClick={() => removeRow(x.i)}
@@ -1070,13 +1104,16 @@ function CertDoc({
         }
       >
         {/* 顶部项目全名 */}
-        <input
-          value={pmtHeader}
-          onChange={(e) => setPmtHeader(e.target.value)}
-          placeholder={t('项目全名（可空）', 'Project full name (optional)')}
-          {...lockAttr('pmtHeader')}
-          className={'w-full bg-transparent text-[12px] font-bold focus:outline-none ' + lockCls('pmtHeader')}
-        />
+        <div className="flex items-center">
+          <input
+            value={pmtHeader}
+            onChange={(e) => setPmtHeader(e.target.value)}
+            placeholder={t('项目全名（可空）', 'Project full name (optional)')}
+            {...lockAttr('pmtHeader')}
+            className={'flex-1 bg-transparent text-[12px] font-bold focus:outline-none ' + lockCls('pmtHeader')}
+          />
+          {lockBtn('pmtHeader')}
+        </div>
 
         <div className="mt-4 flex items-start justify-between">
           <div className="text-[13px] font-bold underline">PAYMENT LIST</div>
@@ -1107,8 +1144,8 @@ function CertDoc({
                     value={r.date}
                     onChange={(e) => setPmtRow(i, 'date', e.target.value)}
                     placeholder={t('日期', 'Date')}
-                    {...lockAttr(`pm-date-${i}`)}
-                    className={'w-full bg-transparent text-center focus:outline-none ' + lockCls(`pm-date-${i}`)}
+                    {...lockAttr(`pm-${i}`)}
+                    className={'w-full bg-transparent text-center focus:outline-none ' + lockCls(`pm-${i}`)}
                   />
                 </td>
                 <td className="border border-black px-1 text-center">
@@ -1116,8 +1153,8 @@ function CertDoc({
                     value={r.cert}
                     onChange={(e) => setPmtRow(i, 'cert', e.target.value)}
                     placeholder="ADVANCE"
-                    {...lockAttr(`pm-cert-${i}`)}
-                    className={'w-full bg-transparent text-center focus:outline-none ' + lockCls(`pm-cert-${i}`)}
+                    {...lockAttr(`pm-${i}`)}
+                    className={'w-full bg-transparent text-center focus:outline-none ' + lockCls(`pm-${i}`)}
                   />
                 </td>
                 <td className="border border-black px-1 text-right">
@@ -1127,17 +1164,20 @@ function CertDoc({
                     onChange={(e) => setPmtRow(i, 'amount', e.target.value)}
                     onBlur={() => setPmtRow(i, 'amount', fmtInput(parseAmount(r.amount)))}
                     placeholder="0"
-                    {...lockAttr(`pm-amt-${i}`)}
-                    className={'w-full bg-transparent text-right focus:outline-none ' + lockCls(`pm-amt-${i}`)}
+                    {...lockAttr(`pm-${i}`)}
+                    className={'w-full bg-transparent text-right focus:outline-none ' + lockCls(`pm-${i}`)}
                   />
                 </td>
                 <td className="border border-black px-1">
-                  <input
-                    value={r.desc}
-                    onChange={(e) => setPmtRow(i, 'desc', e.target.value)}
-                    {...lockAttr(`pm-desc-${i}`)}
-                    className={'w-full bg-transparent focus:outline-none ' + lockCls(`pm-desc-${i}`)}
-                  />
+                  <div className="flex items-center">
+                    <input
+                      value={r.desc}
+                      onChange={(e) => setPmtRow(i, 'desc', e.target.value)}
+                      {...lockAttr(`pm-${i}`)}
+                      className={'flex-1 bg-transparent focus:outline-none ' + lockCls(`pm-${i}`)}
+                    />
+                    {lockBtn(`pm-${i}`)}
+                  </div>
                 </td>
                 {!locked && (
                   <td className="no-print border-0 text-center">
