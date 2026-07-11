@@ -132,6 +132,8 @@ export function Account() {
   const [byMonth, setByMonth] = useState<Record<string, Entry[]>>({})
   const [selectedId, setSelectedId] = useState('')
   const [addTarget, setAddTarget] = useState<null | 'budget' | 'temp'>(null) // 记一笔弹窗目标
+  const [pageLocked, setPageLocked] = useState(true) // 字段锁定：默认锁，防误改
+  const [unlocked, setUnlocked] = useState<Set<string>>(new Set()) // 已单独解锁的项（记录 id 或 '__opening__'）
 
   async function load(keepId?: string) {
     setLoading(true)
@@ -273,7 +275,10 @@ export function Account() {
   if (loading)
     return <div className="py-16 text-center text-slate-500">{t('加载中…', 'Loading…')}</div>
 
-  const locked = false // 锁定功能已移除
+  const locked = false // 旧「预算锁定」语义已停用（保留给 AddSheet 判断，永远 false）
+  // 新：字段锁定 —— 默认锁定，防止误改；点某一笔才解锁那一笔（'__opening__' 代表承上结余）
+  const isUnlocked = (k: string) => !pageLocked || unlocked.has(k)
+  const unlock = (k: string) => setUnlocked((s) => new Set(s).add(k))
 
   // 预算 vs 实际（本月净流，收−支），以及差异从哪来
   const budgetNet = round2(calc.plannedIncome - calc.plannedExpense)
@@ -304,6 +309,24 @@ export function Account() {
           ))}
         </select>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              if (pageLocked) setPageLocked(false)
+              else {
+                setPageLocked(true)
+                setUnlocked(new Set())
+              }
+            }}
+            className={
+              'rounded-md px-2.5 py-1 text-sm font-medium ' +
+              (pageLocked
+                ? 'border border-slate-300 text-slate-600 hover:bg-slate-100'
+                : 'bg-yellow-500 text-slate-900 hover:bg-yellow-400')
+            }
+            title={t('锁定后点某一笔可单独解锁修改', 'When locked, tap an item to unlock just that one')}
+          >
+            {pageLocked ? '🔓 ' + t('解锁', 'Unlock') : '🔒 ' + t('锁定', 'Lock')}
+          </button>
           <button onClick={() => window.print()} className="text-slate-500">
             🖨
           </button>
@@ -376,12 +399,18 @@ export function Account() {
               inputMode="decimal"
               key={selectedId + '-' + calc.opening}
               defaultValue={calc.opening.toFixed(2)}
+              readOnly={!isUnlocked('__opening__')}
+              onClick={!isUnlocked('__opening__') ? () => unlock('__opening__') : undefined}
+              title={!isUnlocked('__opening__') ? t('点一下解锁再改', 'Tap to unlock') : undefined}
               onBlur={(e) => {
                 const v = parseAmount(e.target.value)
                 e.target.value = v.toFixed(2)
                 if (v !== calc.opening) saveOpening(v)
               }}
-              className="w-20 rounded bg-white/50 px-1 py-0.5 text-right text-amber-900 focus:outline-none"
+              className={
+                'w-20 rounded px-1 py-0.5 text-right text-amber-900 focus:outline-none ' +
+                (isUnlocked('__opening__') ? 'bg-white/50' : 'cursor-pointer bg-white/20')
+              }
             />
           ) : (
             <b>{formatMoney(calc.opening)}</b>
@@ -444,6 +473,8 @@ export function Account() {
         onToggle={toggleSettled}
         onCopy={copyToNext}
         onRemove={removeRow}
+        isUnlocked={isUnlocked}
+        onUnlock={unlock}
       />
       <ZoneBox
         title={t('支出 Expense', 'Expense')}
@@ -455,6 +486,8 @@ export function Account() {
         onToggle={toggleSettled}
         onCopy={copyToNext}
         onRemove={removeRow}
+        isUnlocked={isUnlocked}
+        onUnlock={unlock}
       />
 
       {/* 添加按钮 */}
@@ -512,6 +545,8 @@ function ZoneBox({
   onToggle,
   onCopy,
   onRemove,
+  isUnlocked,
+  onUnlock,
 }: {
   title: string
   tone: 'income' | 'expense'
@@ -522,6 +557,8 @@ function ZoneBox({
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
   onRemove: (id: string) => void
+  isUnlocked: (k: string) => boolean
+  onUnlock: (k: string) => void
 }) {
   const { t } = useI18n()
   const isInc = tone === 'income'
@@ -561,6 +598,8 @@ function ZoneBox({
               key={e.id}
               entry={e}
               planned={!e.is_unexpected}
+              editable={isUnlocked(e.id)}
+              onUnlock={() => onUnlock(e.id)}
               onSave={onSave}
               onToggle={onToggle}
               onCopy={onCopy}
@@ -591,6 +630,8 @@ function EntryItem({
   entry: e,
   planned,
   frozen = false,
+  editable = true,
+  onUnlock,
   onSave,
   onToggle,
   onCopy,
@@ -599,6 +640,8 @@ function EntryItem({
   entry: Entry
   planned: boolean
   frozen?: boolean
+  editable?: boolean
+  onUnlock?: () => void
   onSave: (e: Entry, patch: Partial<Entry>) => void
   onToggle: (e: Entry) => void
   onCopy: (e: Entry) => void
@@ -606,6 +649,11 @@ function EntryItem({
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  // 锁定时：任何“会改数据”的点击都先解锁这一笔，不直接生效
+  const guard = (fn: () => void) => () => {
+    if (editable) fn()
+    else onUnlock?.()
+  }
   const isIncome = e.zone === 'income'
   const amtColor = isIncome ? 'text-emerald-600' : 'text-red-600'
   const signed = (isIncome ? '+' : '-') + compactNum(e.amount) // 例：+120,244.58 / -9,150.00
@@ -741,12 +789,13 @@ function EntryItem({
     <div>
       {/* 收起态：项目 ｜ 预算 ｜ 实际（同一行左右对照）*/}
       <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-1 px-3 py-2">
-        {/* 项目（点＝展开编辑）*/}
+        {/* 项目（点＝展开编辑；锁定时点＝先解锁这一笔）*/}
         <button
-          onClick={() => (open ? cancelEdit() : openEditor())}
+          onClick={guard(() => (open ? cancelEdit() : openEditor()))}
           className="flex min-w-0 items-center gap-2 text-left"
+          title={!editable ? t('已锁定，点一下解锁这一笔', 'Locked — tap to unlock this item') : undefined}
         >
-          <span className="text-base">{iconFor(e)}</span>
+          <span className="text-base">{editable ? iconFor(e) : '🔒'}</span>
           <span className="min-w-0">
             {/* 日期明显显示：橙色小标签 */}
             <span className="mb-0.5 flex items-center gap-1">
@@ -781,7 +830,7 @@ function EntryItem({
         <div className="text-right text-xs tabular-nums">
           {isRunning(e) ? (
             // 累计项：显示已花，下面小字显示剩余，点开去加每天记录
-            <button onClick={openEditor} className="no-print text-right">
+            <button onClick={guard(openEditor)} className="no-print text-right">
               <span className={'font-semibold ' + amtColor}>
                 {isIncome ? '+' : '-'}
                 {compactNum(spentOf(e))}
@@ -794,7 +843,7 @@ function EntryItem({
             <span className={'font-semibold ' + amtColor}>{signed}</span>
           ) : e.settled ? (
             <button
-              onClick={() => onToggle(e)}
+              onClick={guard(() => onToggle(e))}
               className={'no-print font-semibold ' + amtColor}
               title={t('已加入实际（点击移出）', 'In actual (tap to remove)')}
             >
@@ -802,7 +851,7 @@ function EntryItem({
             </button>
           ) : (
             <button
-              onClick={() => onToggle(e)}
+              onClick={guard(() => onToggle(e))}
               className="no-print rounded bg-slate-500 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-600"
               title={t('点一下：加入实际', 'Tap to add to actual')}
             >
@@ -813,7 +862,7 @@ function EntryItem({
       </div>
 
       {/* 展开态：预算锁定时只读；否则可编辑 */}
-      {open && frozen && (
+      {open && editable && frozen && (
         <div className="space-y-1 bg-slate-50 px-4 py-3 text-xs text-slate-500">
           <div>
             {t(
@@ -838,7 +887,7 @@ function EntryItem({
           </div>
         </div>
       )}
-      {open && !frozen && (
+      {open && editable && !frozen && (
         <div className="space-y-2 border-l-8 border-amber-500 bg-amber-100 px-4 py-3">
           {running ? (
             <>
