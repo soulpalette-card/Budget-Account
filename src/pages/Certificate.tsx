@@ -14,8 +14,9 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as store from '../lib/store'
-import type { CertData, Subcon, SubconClaim } from '../types'
+import type { AppendixRow, CertData, Subcon, SubconClaim } from '../types'
 import { company } from '../config'
+import { exportCertExcel, exportCertPdf } from '../lib/certExport'
 import { parseAmount, round2 } from '../lib/money'
 import { friendlyError } from '../lib/errors'
 import { useI18n } from '../lib/i18n'
@@ -309,6 +310,33 @@ function CertDoc({
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
   const num = (k: string) => parseAmount(f[k])
 
+  // 附录明细草稿：数量/单价用字符串（方便输入），金额自动 = 数量 × 单价
+  type AppxDraft = { section: 'workdone' | 'vo'; desc: string; unit: string; qty: string; rate: string }
+  const [appx, setAppx] = useState<AppxDraft[]>(
+    (c?.appendix ?? []).map((r) => ({
+      section: r.section,
+      desc: r.desc,
+      unit: r.unit,
+      qty: r.qty ? String(round2(r.qty)) : '',
+      rate: r.rate ? fmtInput(r.rate) : '',
+    })),
+  )
+  const setRow = (i: number, key: keyof AppxDraft, v: string) =>
+    setAppx((p) => p.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)))
+  const addRow = (section: 'workdone' | 'vo') =>
+    setAppx((p) => [...p, { section, desc: '', unit: '', qty: '', rate: '' }])
+  const removeRow = (i: number) => setAppx((p) => p.filter((_, idx) => idx !== i))
+  const rowAmt = (r: AppxDraft) => round2(parseAmount(r.qty) * parseAmount(r.rate))
+  const wdSub = round2(
+    appx.filter((r) => r.section === 'workdone').reduce((s, r) => s + rowAmt(r), 0),
+  )
+  const voSub = round2(appx.filter((r) => r.section === 'vo').reduce((s, r) => s + rowAmt(r), 0))
+  // 有没有“有意义的”附录行（用来决定要不要出附录页 / 列印第二页）
+  const hasAppx = appx.some((r) => r.desc.trim() !== '' || parseAmount(r.qty) !== 0 || parseAmount(r.rate) !== 0)
+  // 某个 section 的行（带原始下标，方便编辑/删除）
+  const secRows = (sec: 'workdone' | 'vo') =>
+    appx.map((r, i) => ({ r, i })).filter((x) => x.r.section === sec)
+
   const calc = compute({
     workdone: num('workdone'),
     vo: num('vo'),
@@ -323,6 +351,49 @@ function CertDoc({
   })
   const claimNoPad = String(Math.max(1, Math.round(parseAmount(f.claimNo)) || 1)).padStart(2, '0')
 
+  // 把当前草稿组装成 CertData（保存 / 导出共用），附录会过滤掉空行
+  function buildCert(): CertData {
+    const appendix: AppendixRow[] = appx
+      .map((r) => ({
+        section: r.section,
+        desc: r.desc.trim(),
+        unit: r.unit.trim(),
+        qty: parseAmount(r.qty),
+        rate: parseAmount(r.rate),
+      }))
+      .filter((r) => r.desc !== '' || r.qty !== 0 || r.rate !== 0)
+    return {
+      claimPeriod: f.claimPeriod || undefined,
+      refLA: f.refLA || undefined,
+      subconRef: f.subconRef || undefined,
+      dateCommencement: f.dateCommencement || undefined,
+      dateCompletion: f.dateCompletion || undefined,
+      projectTitle: f.projectTitle || undefined,
+      subContractor: f.subContractor.trim(),
+      trade: f.trade || undefined,
+      contractSum: f.contractSum || undefined,
+      retentionPct: parseAmount(f.retentionPct),
+      claimNo: Math.max(1, Math.round(parseAmount(f.claimNo)) || 1),
+      periodEnding: f.periodEnding || undefined,
+      valuationDate: f.valuationDate || undefined,
+      termOfPayment: f.termOfPayment || undefined,
+      workdone: num('workdone'),
+      vo: num('vo'),
+      advance3: num('advance3'),
+      addAdvance: num('addAdvance'),
+      addKsk: num('addKsk'),
+      addOthers: num('addOthers'),
+      dedPrevious: num('dedPrevious'),
+      dedKsk: num('dedKsk'),
+      dedBackcharge: num('dedBackcharge'),
+      appendix: appendix.length > 0 ? appendix : undefined,
+      preparedBy: f.preparedBy || undefined,
+      verifiedBy: f.verifiedBy || undefined,
+      checkedBy: f.checkedBy || undefined,
+      approvedBy: f.approvedBy || undefined,
+    }
+  }
+
   async function save() {
     if (!f.subContractor.trim()) {
       fail(t('请填分包商名字（Sub-Contractor）。', 'Please enter the Sub-Contractor name.'))
@@ -331,35 +402,7 @@ function CertDoc({
     setBusy(true)
     setErrMsg('')
     try {
-      const cert: CertData = {
-        claimPeriod: f.claimPeriod || undefined,
-        refLA: f.refLA || undefined,
-        subconRef: f.subconRef || undefined,
-        dateCommencement: f.dateCommencement || undefined,
-        dateCompletion: f.dateCompletion || undefined,
-        projectTitle: f.projectTitle || undefined,
-        subContractor: f.subContractor.trim(),
-        trade: f.trade || undefined,
-        contractSum: f.contractSum || undefined,
-        retentionPct: parseAmount(f.retentionPct),
-        claimNo: Math.max(1, Math.round(parseAmount(f.claimNo)) || 1),
-        periodEnding: f.periodEnding || undefined,
-        valuationDate: f.valuationDate || undefined,
-        termOfPayment: f.termOfPayment || undefined,
-        workdone: num('workdone'),
-        vo: num('vo'),
-        advance3: num('advance3'),
-        addAdvance: num('addAdvance'),
-        addKsk: num('addKsk'),
-        addOthers: num('addOthers'),
-        dedPrevious: num('dedPrevious'),
-        dedKsk: num('dedKsk'),
-        dedBackcharge: num('dedBackcharge'),
-        preparedBy: f.preparedBy || undefined,
-        verifiedBy: f.verifiedBy || undefined,
-        checkedBy: f.checkedBy || undefined,
-        approvedBy: f.approvedBy || undefined,
-      }
+      const cert = buildCert()
       await store.saveCertificate({
         id: claim?.id,
         subcon: cert.subContractor!,
@@ -374,6 +417,21 @@ function CertDoc({
       fail(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  // 一键导出：用当前屏幕上的内容（含未保存改动）生成文件
+  function doExport(kind: 'pdf' | 'excel') {
+    if (!f.subContractor.trim()) {
+      fail(t('请先填分包商名字再导出。', 'Please enter the Sub-Contractor name before exporting.'))
+      return
+    }
+    try {
+      const payload = { cert: buildCert(), calc, claimNoPad }
+      if (kind === 'pdf') exportCertPdf(payload)
+      else exportCertExcel(payload)
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err))
     }
   }
   async function remove() {
@@ -427,6 +485,18 @@ function CertDoc({
             className="rounded bg-emerald-500 px-3 py-1.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50"
           >
             💾 {t('保存', 'Save')}
+          </button>
+          <button
+            onClick={() => doExport('pdf')}
+            className="rounded bg-rose-500 px-3 py-1.5 text-sm font-semibold hover:bg-rose-600"
+          >
+            📄 PDF
+          </button>
+          <button
+            onClick={() => doExport('excel')}
+            className="rounded bg-teal-600 px-3 py-1.5 text-sm font-semibold hover:bg-teal-700"
+          >
+            📊 Excel
           </button>
           <button
             onClick={() => window.print()}
@@ -627,6 +697,145 @@ function CertDoc({
             </tr>
           </tbody>
         </table>
+      </div>
+
+      {/* ===== 附录 Appendix：支撑封面的逐项测量（列印时另起一页）===== */}
+      <div
+        className={
+          'cert-doc mx-auto my-4 max-w-[820px] bg-white p-8 text-[12px] leading-tight text-black shadow-lg print:my-0 print:max-w-none print:p-0 print:shadow-none print:break-before-page ' +
+          (hasAppx ? '' : 'print:hidden')
+        }
+      >
+        {/* 抬头（与封面一致）*/}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-lg font-extrabold tracking-wide">{company.name}</div>
+            <div className="text-[11px]">{company.regNo}</div>
+          </div>
+          <div className="text-right text-[10px] leading-snug text-slate-700">
+            <div>{company.address}</div>
+            <div>☎ {company.phone}</div>
+            <div>✉ {company.email}</div>
+          </div>
+        </div>
+        <div className="mt-2 border-t-4 border-black" />
+        <div className="my-1 border-y border-black py-1 text-center text-[13px] font-bold">
+          APPENDIX — DETAIL OF WORKDONE (CLAIM NO. {claimNoPad})
+        </div>
+        <div className="mb-2 text-[11px] font-bold">
+          {[
+            f.subContractor,
+            f.trade,
+            f.projectTitle,
+            f.periodEnding ? 'Period: ' + f.periodEnding : '',
+          ]
+            .filter(Boolean)
+            .join('  |  ')}
+        </div>
+
+        {/* 表头 */}
+        <div className="flex items-center border-b-2 border-black py-1 text-[11px] font-bold">
+          <span className="w-7">No</span>
+          <span className="flex-1">Description</span>
+          <span className="w-14">Unit</span>
+          <span className="w-16 text-right">Qty</span>
+          <span className="w-24 text-right">Rate (RM)</span>
+          <span className="w-28 text-right">Amount (RM)</span>
+          <span className="no-print w-6" />
+        </div>
+
+        {/* 两个分区：工程量 / 变更单 */}
+        {(['workdone', 'vo'] as const).map((sec) => {
+          const rows = secRows(sec)
+          const sub = sec === 'workdone' ? wdSub : voSub
+          const title =
+            sec === 'workdone'
+              ? t('A. 工程量 VALUE OF WORKDONE（→ 封面 1）', 'A. VALUE OF WORKDONE (→ front page 1)')
+              : t('B. 变更单 VARIATION ORDER（→ 封面 2）', 'B. VARIATION ORDER (→ front page 2)')
+          return (
+            <div key={sec} className="mt-1">
+              <div className="border-b border-black py-0.5 text-[11px] font-bold">{title}</div>
+              {rows.map((x, j) => (
+                <div key={x.i} className="flex items-center border-b border-slate-200 py-0.5">
+                  <span className="w-7">{j + 1}</span>
+                  <input
+                    value={x.r.desc}
+                    onChange={(e) => setRow(x.i, 'desc', e.target.value)}
+                    placeholder={t('工作说明', 'Description')}
+                    className="flex-1 bg-transparent px-1 focus:bg-amber-50 focus:outline-none"
+                  />
+                  <input
+                    value={x.r.unit}
+                    onChange={(e) => setRow(x.i, 'unit', e.target.value)}
+                    placeholder={t('单位', 'Unit')}
+                    className="w-14 bg-transparent px-1 focus:bg-amber-50 focus:outline-none"
+                  />
+                  <input
+                    value={x.r.qty}
+                    inputMode="decimal"
+                    onChange={(e) => setRow(x.i, 'qty', e.target.value)}
+                    placeholder="0"
+                    className="w-16 bg-transparent px-1 text-right focus:bg-amber-50 focus:outline-none"
+                  />
+                  <input
+                    value={x.r.rate}
+                    inputMode="decimal"
+                    onChange={(e) => setRow(x.i, 'rate', e.target.value)}
+                    onBlur={() => setRow(x.i, 'rate', fmtInput(parseAmount(x.r.rate)))}
+                    placeholder="0"
+                    className="w-24 bg-transparent px-1 text-right focus:bg-amber-50 focus:outline-none"
+                  />
+                  <span className="w-28 px-1 text-right">{fmtAmt(rowAmt(x.r))}</span>
+                  <button
+                    onClick={() => removeRow(x.i)}
+                    className="no-print w-6 text-slate-300 hover:text-red-500"
+                    title={t('删除这行', 'Remove')}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => addRow(sec)}
+                className="no-print mt-1 text-[11px] font-medium text-amber-600 hover:underline"
+              >
+                {t('＋ 加一行', '＋ Add row')}
+              </button>
+              <div className="flex items-center border-t border-black py-0.5 text-[11px] font-bold">
+                <span className="flex-1 pr-2 text-right">{t('小计 Subtotal', 'Subtotal')}</span>
+                <span className="w-28 px-1 text-right">{fmtAmt(sub)}</span>
+                <span className="no-print w-6" />
+              </div>
+            </div>
+          )
+        })}
+
+        {/* 与封面对照 + 一键带入（只在屏幕显示）*/}
+        <div className="no-print mt-3 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              {t('附录小计', 'Appendix subtotal')}：{t('工程量', 'Workdone')} RM {fmtAmt(wdSub)} · VO RM{' '}
+              {fmtAmt(voSub)}
+              <br />
+              {t('封面填的', 'Front page')}：{t('工程量', 'Workdone')} RM {fmtAmt(num('workdone'))} · VO RM{' '}
+              {fmtAmt(num('vo'))}
+            </div>
+            <button
+              onClick={() => {
+                set('workdone', fmtInput(wdSub))
+                set('vo', fmtInput(voSub))
+              }}
+              className="rounded-md bg-slate-800 px-3 py-1.5 font-semibold text-white hover:bg-slate-700"
+            >
+              {t('把小计带入封面', 'Sync to front page')}
+            </button>
+          </div>
+          {hasAppx && (round2(num('workdone')) !== wdSub || round2(num('vo')) !== voSub) && (
+            <div className="mt-1 font-semibold text-amber-700">
+              ⚠️ {t('附录小计和封面金额不一致，点上面按钮带入。', 'Appendix subtotal differs from front page — click Sync.')}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

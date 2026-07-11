@@ -68,6 +68,16 @@ export interface LogItem {
   amount: number // 当天花了多少
 }
 
+// 附录(Appendix)里的一行明细：支撑封面「工程量/变更单」金额的逐项测量
+//   金额 = 数量 × 单价（程序自动算）。section 决定这行归到封面第 1 项还是第 2 项。
+export interface AppendixRow {
+  section: 'workdone' | 'vo' // workdone=计入封面「1 工程量」；vo=计入封面「2 变更单」
+  desc: string // 工作/项目说明
+  unit: string // 单位，例如 m²、吨、nos、item
+  qty: number // 数量
+  rate: number // 单价（RM）
+}
+
 // 一张「进度付款证书」的全部内容（存进 subcon_claims.cert 这个 jsonb 里）
 //   金额都是数字；文字都是字符串。计算(小计/保留金/净额/应付)由程序自动算。
 export interface CertData {
@@ -97,6 +107,8 @@ export interface CertData {
   dedPrevious?: number // 6 DEDUCTION - Previous Amount Payment
   dedKsk?: number // 6 DEDUCTION - KSK
   dedBackcharge?: number // 6 DEDUCTION - Backcharge
+  // —— 附录明细（支撑封面工程量/变更单）——
+  appendix?: AppendixRow[] // 逐项测量明细；为空就不出附录页
   // —— 签名栏名字 ——
   preparedBy?: string
   verifiedBy?: string
