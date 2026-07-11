@@ -81,6 +81,32 @@ export const company = {
 }
 
 // ============================================================================
+// 证书「附录 Appendix」的固定分类框（我们的 subcon 常做的工种）
+// ----------------------------------------------------------------------------
+// 每一个 = 附录里一个「框」。开证书时这些框会自动摆好，你只要填总数量(qty)；
+// 如果要分地点（例：Level 1 beam / Level 4 slab），就在那个框「＋加一行」自己填。
+//   group：这个框算进封面第几项 —— 'workdone'=第1项工程量 / 'vo'=第2项变更单
+//   unit ：新加行时默认带的单位（可改），例如 吨/m²/m³/天
+// 想加/改/删分类，直接改这个数组即可。
+// ============================================================================
+export interface CertScope {
+  key: string // 唯一标识（存进数据，别随便改已用过的）
+  label: string // 显示名字（屏幕/Excel 用，可含中文）
+  en: string // 纯英文名字（PDF 列印用，因为 PDF 字体不支持中文）
+  group: 'workdone' | 'vo' // 算进封面第1项还是第2项
+  unit: string // 默认单位
+}
+export const certScopes: CertScope[] = [
+  { key: 'rebar', label: 'Rebar 钢筋', en: 'Rebar', group: 'workdone', unit: 'tonne' },
+  { key: 'formwork', label: 'Formwork 模板', en: 'Formwork', group: 'workdone', unit: 'm²' },
+  { key: 'concrete', label: 'Concrete 混凝土', en: 'Concrete', group: 'workdone', unit: 'm³' },
+  { key: 'leancon', label: 'Lean Concrete 垫层', en: 'Lean Concrete', group: 'workdone', unit: 'm³' },
+  { key: 'brc', label: 'BRC', en: 'BRC', group: 'workdone', unit: 'm²' },
+  { key: 'daywork', label: 'Daywork 点工/借工', en: 'Daywork', group: 'workdone', unit: 'day' },
+  { key: 'vo', label: 'Variation Order 变更', en: 'Variation Order', group: 'vo', unit: '' },
+]
+
+// ============================================================================
 // 「设置」页临时改参数的机制（大白话）
 // ----------------------------------------------------------------------------
 // 上面的 config 是“出厂默认值”。但我们希望在网页的「设置」页里也能改这些参数，

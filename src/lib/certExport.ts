@@ -13,8 +13,35 @@ import { jsPDF } from 'jspdf'
 // 这样导出的 Excel 才能排成和证书一样的表格样子。
 import * as XLSX from 'xlsx-js-style'
 import type { AppendixRow, CertData } from '../types'
-import { company } from '../config'
+import { certScopes, company } from '../config'
 import { round2 } from './money'
+
+// 分类标签 / 分组（找不到就用原值 / 当工程量）
+// catLabel = 带中文（Excel/屏幕用）；catLabelEn = 纯英文（PDF 用，字体不支持中文）
+function catLabel(category?: string): string {
+  if (!category) return ''
+  return certScopes.find((s) => s.key === category)?.label ?? category
+}
+function catLabelEn(category?: string): string {
+  if (!category) return ''
+  const sc = certScopes.find((s) => s.key === category)
+  if (sc) return sc.en
+  // 自定义/旧分类：去掉非 ASCII，避免 PDF 出乱码
+  return category.replace(/[^\x20-\x7E]/g, '').trim() || category
+}
+function catGroup(category?: string): 'workdone' | 'vo' {
+  return certScopes.find((s) => s.key === category)?.group ?? 'workdone'
+}
+// 附录按「分类框」排好序：先 config 顺序，再补数据里多出来的分类
+function appendixCategories(appx: AppendixRow[]): string[] {
+  const inData = [...new Set(appx.map((r) => r.category ?? r.section))]
+  const ordered = certScopes.map((s) => s.key).filter((k) => inData.includes(k))
+  const extra = inData.filter((k) => !certScopes.some((s) => s.key === k))
+  return [...ordered, ...extra]
+}
+function rowCat(r: AppendixRow): string {
+  return r.category ?? r.section
+}
 
 // 传进来的整包数据：证书内容 + 已算好的金额 + 补零后的期数
 export interface CertExport {
@@ -305,10 +332,6 @@ function drawAppendix(doc: jsPDF, data: CertExport) {
 
   doc.setFont('helvetica', 'normal').setFontSize(9)
   const appx = c.appendix ?? []
-  const sections: { key: 'workdone' | 'vo'; title: string }[] = [
-    { key: 'workdone', title: 'A. VALUE OF WORKDONE' },
-    { key: 'vo', title: 'B. VARIATION ORDER' },
-  ]
 
   const pageBottom = 280
   const ensureSpace = () => {
@@ -321,12 +344,15 @@ function drawAppendix(doc: jsPDF, data: CertExport) {
     }
   }
 
-  for (const sec of sections) {
-    const rows = appx.filter((r) => r.section === sec.key)
+  // 每个分类框：标题 + 明细行 + 框小计
+  let wdTotal = 0
+  let voTotal = 0
+  for (const cat of appendixCategories(appx)) {
+    const rows = appx.filter((r) => rowCat(r) === cat)
     if (rows.length === 0) continue
     ensureSpace()
     doc.setFont('helvetica', 'bold')
-    doc.text(sec.title, cNo, y)
+    doc.text(catLabelEn(cat), cNo, y)
     y += 5
     doc.setFont('helvetica', 'normal')
     let subtotal = 0
@@ -343,14 +369,28 @@ function drawAppendix(doc: jsPDF, data: CertExport) {
       doc.text(fmt(amt), cAmt, y, { align: 'right' })
       y += Math.max(5, desc.length * 4.2)
     })
-    // 小计
+    if (catGroup(cat) === 'vo') voTotal += subtotal
+    else wdTotal += subtotal
+    // 框小计
     doc.setLineWidth(0.2).line(cRate - 6, y - 3.5, cAmt, y - 3.5)
     doc.setFont('helvetica', 'bold')
-    doc.text(`Subtotal ${sec.title.startsWith('A') ? '(-> front page item 1)' : '(-> front page item 2)'}`, cDesc, y)
+    doc.text(`Subtotal ${catLabelEn(cat)}`, cDesc, y)
     doc.text(fmt(round2(subtotal)), cAmt, y, { align: 'right' })
     doc.setFont('helvetica', 'normal')
-    y += 8
+    y += 7
   }
+
+  // 两项合计（→ 封面第 1、2 项）
+  ensureSpace()
+  y += 2
+  doc.setLineWidth(0.4).line(L, y - 4, R, y - 4)
+  doc.setFont('helvetica', 'bold')
+  doc.text('TOTAL WORKDONE (-> front page item 1)', cDesc, y)
+  doc.text(fmt(round2(wdTotal)), cAmt, y, { align: 'right' })
+  y += 6
+  doc.text('TOTAL VO (-> front page item 2)', cDesc, y)
+  doc.text(fmt(round2(voTotal)), cAmt, y, { align: 'right' })
+  doc.setFont('helvetica', 'normal')
 }
 
 // ============================================================================
@@ -578,10 +618,13 @@ export function buildCertWorkbook(data: CertExport): XLSX.WorkBook {
   ar++
 
   const appx = c.appendix ?? []
-  const drawSection = (title: string, section: 'workdone' | 'vo') => {
-    const rows = appx.filter((x) => x.section === section)
-    if (rows.length === 0) return 0
-    put(ax, ar, 0, title, { font: { bold: true } })
+  let wdTotal = 0
+  let voTotal = 0
+  // 每个分类框：标题行 + 明细 + 框小计
+  for (const cat of appendixCategories(appx)) {
+    const rows = appx.filter((x) => rowCat(x) === cat)
+    if (rows.length === 0) continue
+    put(ax, ar, 0, catLabel(cat), { font: { bold: true } })
     mergeCells(ax, ar, 0, ar, AL)
     ar++
     let sub = 0
@@ -597,16 +640,23 @@ export function buildCertWorkbook(data: CertExport): XLSX.WorkBook {
       put(ax, ar, 6, amt, { numFmt: MONEY_FMT, alignment: { horizontal: 'right' } })
       ar++
     })
-    put(ax, ar, 1, `Subtotal ${section === 'workdone' ? '(-> front page item 1)' : '(-> front page item 2)'}`, {
-      font: { bold: true },
-    })
+    if (catGroup(cat) === 'vo') voTotal += sub
+    else wdTotal += sub
+    put(ax, ar, 1, `Subtotal ${catLabel(cat)}`, { font: { bold: true } })
     mergeCells(ax, ar, 1, ar, 5)
     put(ax, ar, 6, round2(sub), { numFmt: MONEY_FMT, alignment: { horizontal: 'right' }, font: { bold: true }, border: { top: thin } })
     ar += 2
-    return round2(sub)
   }
-  drawSection('A. VALUE OF WORKDONE', 'workdone')
-  drawSection('B. VARIATION ORDER', 'vo')
+  // 两项合计（→ 封面第 1、2 项）
+  const totalStyle = { font: { bold: true }, border: { top: { style: 'medium', color: { rgb: 'FF000000' } } } }
+  put(ax, ar, 1, 'TOTAL WORKDONE (-> front page item 1)', totalStyle)
+  mergeCells(ax, ar, 1, ar, 5)
+  put(ax, ar, 6, round2(wdTotal), { ...totalStyle, numFmt: MONEY_FMT, alignment: { horizontal: 'right' } })
+  ar++
+  put(ax, ar, 1, 'TOTAL VO (-> front page item 2)', { font: { bold: true } })
+  mergeCells(ax, ar, 1, ar, 5)
+  put(ax, ar, 6, round2(voTotal), { numFmt: MONEY_FMT, alignment: { horizontal: 'right' }, font: { bold: true } })
+  ar += 2
 
   ax['!cols'] = [{ wch: 5 }, { wch: 30 }, { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 14 }]
   ax['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: ar + 1, c: AL } })

@@ -72,7 +72,8 @@ export interface LogItem {
 //   金额 = 数量 × 单价（程序自动算）。section 决定这行归到封面第 1 项还是第 2 项。
 export interface AppendixRow {
   section: 'workdone' | 'vo' // workdone=计入封面「1 工程量」；vo=计入封面「2 变更单」
-  desc: string // 工作/项目说明
+  category?: string // 属于哪个固定分类框（rebar/formwork/…，见 config.certScopes）
+  desc: string // 工作/项目说明（例如地点：Level 1 beam；没有可留空）
   unit: string // 单位，例如 m²、吨、nos、item
   qty: number // 数量
   rate: number // 单价（RM）

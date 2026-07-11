@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as store from '../lib/store'
 import type { AppendixRow, CertData, Subcon, SubconClaim } from '../types'
-import { company } from '../config'
+import { certScopes, company } from '../config'
 import { exportCertExcel, exportCertPdf } from '../lib/certExport'
 import { parseAmount, round2 } from '../lib/money'
 import { friendlyError } from '../lib/errors'
@@ -367,32 +367,55 @@ function CertDoc({
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
   const num = (k: string) => parseAmount(f[k])
 
-  // 附录明细草稿：数量/单价用字符串（方便输入），金额自动 = 数量 × 单价
-  type AppxDraft = { section: 'workdone' | 'vo'; desc: string; unit: string; qty: string; rate: string }
-  const [appx, setAppx] = useState<AppxDraft[]>(
-    (c?.appendix ?? []).map((r) => ({
-      section: r.section,
+  // 附录明细草稿：按「固定分类框」组织。数量/单价用字符串（方便输入），金额自动 = 数量 × 单价
+  type AppxDraft = { category: string; desc: string; unit: string; qty: string; rate: string }
+  // 某分类默认属于封面第几项（找不到就当工程量）
+  const groupOf = (category: string): 'workdone' | 'vo' =>
+    certScopes.find((s) => s.key === category)?.group ?? 'workdone'
+  const catLabel = (category: string) => certScopes.find((s) => s.key === category)?.label ?? category
+  const catUnit = (category: string) => certScopes.find((s) => s.key === category)?.unit ?? ''
+  // 初始化：把已有明细读进来；再确保每个固定分类框至少有一行（这样一打开就摆好了框）
+  const initAppx = (): AppxDraft[] => {
+    const rows: AppxDraft[] = (c?.appendix ?? []).map((r) => ({
+      category: r.category ?? r.section, // 兼容旧数据（旧行只有 section）
       desc: r.desc,
       unit: r.unit,
       qty: r.qty ? String(round2(r.qty)) : '',
       rate: r.rate ? fmtInput(r.rate) : '',
-    })),
-  )
+    }))
+    for (const sc of certScopes) {
+      if (!rows.some((r) => r.category === sc.key)) {
+        rows.push({ category: sc.key, desc: '', unit: sc.unit, qty: '', rate: '' })
+      }
+    }
+    return rows
+  }
+  const [appx, setAppx] = useState<AppxDraft[]>(initAppx)
   const setRow = (i: number, key: keyof AppxDraft, v: string) =>
     setAppx((p) => p.map((r, idx) => (idx === i ? { ...r, [key]: v } : r)))
-  const addRow = (section: 'workdone' | 'vo') =>
-    setAppx((p) => [...p, { section, desc: '', unit: '', qty: '', rate: '' }])
+  const addRow = (category: string) =>
+    setAppx((p) => [...p, { category, desc: '', unit: catUnit(category), qty: '', rate: '' }])
   const removeRow = (i: number) => setAppx((p) => p.filter((_, idx) => idx !== i))
   const rowAmt = (r: AppxDraft) => round2(parseAmount(r.qty) * parseAmount(r.rate))
+  // 封面两项小计：所有 workdone 类之和 / 所有 vo 类之和
   const wdSub = round2(
-    appx.filter((r) => r.section === 'workdone').reduce((s, r) => s + rowAmt(r), 0),
+    appx.filter((r) => groupOf(r.category) === 'workdone').reduce((s, r) => s + rowAmt(r), 0),
   )
-  const voSub = round2(appx.filter((r) => r.section === 'vo').reduce((s, r) => s + rowAmt(r), 0))
-  // 有没有“有意义的”附录行（用来决定要不要出附录页 / 列印第二页）
+  const voSub = round2(
+    appx.filter((r) => groupOf(r.category) === 'vo').reduce((s, r) => s + rowAmt(r), 0),
+  )
+  // 有没有“有意义的”附录行（决定要不要出附录页 / 列印第二页）
   const hasAppx = appx.some((r) => r.desc.trim() !== '' || parseAmount(r.qty) !== 0 || parseAmount(r.rate) !== 0)
-  // 某个 section 的行（带原始下标，方便编辑/删除）
-  const secRows = (sec: 'workdone' | 'vo') =>
-    appx.map((r, i) => ({ r, i })).filter((x) => x.r.section === sec)
+  // 要显示的分类框顺序：先按 config，再补上数据里有、但 config 没有的（旧/自定义）
+  const catOrder: string[] = [
+    ...certScopes.map((s) => s.key),
+    ...[...new Set(appx.map((r) => r.category))].filter((cat) => !certScopes.some((s) => s.key === cat)),
+  ]
+  // 某分类的行（带原始下标，方便编辑/删除）
+  const catRows = (category: string) =>
+    appx.map((r, i) => ({ r, i })).filter((x) => x.r.category === category)
+  const catSub = (category: string) =>
+    round2(appx.filter((r) => r.category === category).reduce((s, r) => s + rowAmt(r), 0))
 
   const calc = compute({
     workdone: num('workdone'),
@@ -412,7 +435,8 @@ function CertDoc({
   function buildCert(): CertData {
     const appendix: AppendixRow[] = appx
       .map((r) => ({
-        section: r.section,
+        section: groupOf(r.category),
+        category: r.category,
         desc: r.desc.trim(),
         unit: r.unit.trim(),
         qty: parseAmount(r.qty),
@@ -801,24 +825,31 @@ function CertDoc({
           <span className="no-print w-6" />
         </div>
 
-        {/* 两个分区：工程量 / 变更单 */}
-        {(['workdone', 'vo'] as const).map((sec) => {
-          const rows = secRows(sec)
-          const sub = sec === 'workdone' ? wdSub : voSub
-          const title =
-            sec === 'workdone'
-              ? t('A. 工程量 VALUE OF WORKDONE（→ 封面 1）', 'A. VALUE OF WORKDONE (→ front page 1)')
-              : t('B. 变更单 VARIATION ORDER（→ 封面 2）', 'B. VARIATION ORDER (→ front page 2)')
+        {/* 固定分类框：rebar / formwork / concrete / lean con / BRC / daywork / VO … */}
+        {catOrder.map((category) => {
+          const rows = catRows(category)
+          const isVo = groupOf(category) === 'vo'
           return (
-            <div key={sec} className="mt-1">
-              <div className="border-b border-black py-0.5 text-[11px] font-bold">{title}</div>
+            <div key={category} className="mt-2">
+              <div className="flex items-center justify-between border-b border-black py-0.5 text-[11px] font-bold">
+                <span>
+                  {catLabel(category)}
+                  {isVo ? t('（→ 封面 2 变更）', ' (-> front page 2)') : ''}
+                </span>
+                <span className="text-slate-400">{fmtAmt(catSub(category))}</span>
+              </div>
+              {rows.length === 0 && (
+                <div className="no-print py-1 text-[10px] text-slate-300">
+                  {t('这个框还没填，点下面「＋加一行」', 'Empty — click “+ Add row” below')}
+                </div>
+              )}
               {rows.map((x, j) => (
                 <div key={x.i} className="flex items-center border-b border-slate-200 py-0.5">
                   <span className="w-7">{j + 1}</span>
                   <input
                     value={x.r.desc}
                     onChange={(e) => setRow(x.i, 'desc', e.target.value)}
-                    placeholder={t('工作说明', 'Description')}
+                    placeholder={t('地点/说明（可空）', 'Location/desc (optional)')}
                     className="flex-1 bg-transparent px-1 focus:bg-amber-50 focus:outline-none"
                   />
                   <input
@@ -853,19 +884,32 @@ function CertDoc({
                 </div>
               ))}
               <button
-                onClick={() => addRow(sec)}
-                className="no-print mt-1 text-[11px] font-medium text-amber-600 hover:underline"
+                onClick={() => addRow(category)}
+                className="no-print mt-0.5 text-[11px] font-medium text-amber-600 hover:underline"
               >
-                {t('＋ 加一行', '＋ Add row')}
+                {t('＋ 加一行（分地点）', '＋ Add row (by location)')}
               </button>
-              <div className="flex items-center border-t border-black py-0.5 text-[11px] font-bold">
-                <span className="flex-1 pr-2 text-right">{t('小计 Subtotal', 'Subtotal')}</span>
-                <span className="w-28 px-1 text-right">{fmtAmt(sub)}</span>
-                <span className="no-print w-6" />
-              </div>
             </div>
           )
         })}
+
+        {/* 两项合计（→ 封面）*/}
+        <div className="mt-3 border-t-2 border-black pt-1">
+          <div className="flex items-center py-0.5 text-[11px] font-bold">
+            <span className="flex-1 pr-2 text-right">
+              {t('工程量合计 TOTAL WORKDONE（→ 封面 1）', 'TOTAL WORKDONE (-> front page 1)')}
+            </span>
+            <span className="w-28 px-1 text-right">{fmtAmt(wdSub)}</span>
+            <span className="no-print w-6" />
+          </div>
+          <div className="flex items-center py-0.5 text-[11px] font-bold">
+            <span className="flex-1 pr-2 text-right">
+              {t('变更合计 TOTAL VO（→ 封面 2）', 'TOTAL VO (-> front page 2)')}
+            </span>
+            <span className="w-28 px-1 text-right">{fmtAmt(voSub)}</span>
+            <span className="no-print w-6" />
+          </div>
+        </div>
 
         {/* 与封面对照 + 一键带入（只在屏幕显示）*/}
         <div className="no-print mt-3 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600">
